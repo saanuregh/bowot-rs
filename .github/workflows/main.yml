@@ -1,20 +1,25 @@
-name: CI
+name: Docker Image CI
+
 on:
   push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
-    
-env:
-  GCLOUD_SERVICE_KEY: ${{ secrets.GKE_SA_KEY }}
-  GOOGLE_PROJECT_ID: ${{ secrets.GKE_PROJECT }}
 
 jobs:
+
   build:
+
     runs-on: ubuntu-latest
+
     steps:
-      - uses: RaccoonDev/push-docker-gcr@v1
+      - name: Checkout code
+        uses: actions/checkout@v2
+    
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v1
         with:
-          gcr_host: gcr.io
-          image_name: bowot
-          image_tag: latest
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: saanu09xs/bowot
+          tags: latest
