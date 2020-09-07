@@ -1,0 +1,15 @@
+version: '3'
+services:
+    bowot:
+        build: .
+        depends_on:
+            - lavalink
+        volumes:
+            - ./config.toml:/bowot/config.toml
+    lavalink:
+        image: skyrabot/lavalink:latest
+        restart: always
+        ports:
+        - 127.0.0.1:2333:2333
+        volumes:
+        - ./application.yml:/opt/Lavalink/application.yml
