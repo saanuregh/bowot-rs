@@ -15,5 +15,6 @@ jobs:
     steps:
       - uses: RaccoonDev/push-docker-gcr@v1
         with:
+          gcr_host: gcr.io
           image_name: bowot
           image_tag: latest
