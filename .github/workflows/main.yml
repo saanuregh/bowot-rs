@@ -13,8 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: raccoondev/push-docker-gcr
+      - uses: RaccoonDev/push-docker-gcr@v1
         with:
-          gcr_host: eu.gcr.io
           image_name: bowot
           image_tag: latest
