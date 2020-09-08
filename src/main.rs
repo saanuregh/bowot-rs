@@ -2,6 +2,7 @@ mod commands;
 mod database;
 mod framework;
 mod handler;
+mod player;
 mod service;
 mod utils;
 
@@ -12,12 +13,11 @@ use handler::Handler;
 use dotenv;
 use std::{
     clone::Clone,
-    collections::HashSet,
-    convert::TryInto,
+    collections::{HashMap, HashSet},
     fs::File,
     io::prelude::*,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{ Instant},
 };
 use tokio::sync::Mutex;
 use tracing::{error, info, instrument, Level};
@@ -26,15 +26,12 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 //use tracing_futures::Instrument;
 //use log;
 
-use lavalink_rs::{gateway::LavalinkEventHandler, LavalinkClient};
 use serenity::{
-    async_trait,
     client::{
         bridge::{gateway::ShardManager, voice::ClientVoiceManager},
         Client,
     },
     http::Http,
-    model::id::GuildId,
     prelude::{RwLock, TypeMapKey},
 };
 use toml::Value;
@@ -47,9 +44,7 @@ struct MongoClient; // The connection to the mongo database.
 struct Config; // For the configuration found on "config.toml"
 struct Uptime; //  This is for the startup time of the bot.
 struct VoiceManager; //  This is the struct for the voice manager.
-struct VoiceGuildUpdate; //  Hashset of guilds having active voice connection.
-struct Lavalink; //  This is the struct for the lavalink client.
-struct LavalinkHandler;
+struct PlayerManager; //  Hashset of guilds having active voice connection.
 
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
@@ -67,20 +62,13 @@ impl TypeMapKey for Uptime {
     type Value = Instant;
 }
 
-impl TypeMapKey for VoiceGuildUpdate {
-    type Value = Arc<RwLock<HashSet<GuildId>>>;
-}
-
 impl TypeMapKey for VoiceManager {
     type Value = Arc<Mutex<ClientVoiceManager>>;
 }
 
-impl TypeMapKey for Lavalink {
-    type Value = Arc<Mutex<LavalinkClient>>;
+impl TypeMapKey for PlayerManager {
+    type Value = Arc<RwLock<HashMap<u64,player::Player>>>;
 }
-
-#[async_trait]
-impl LavalinkEventHandler for LavalinkHandler {}
 
 #[tokio::main(core_threads = 8)]
 #[instrument]
@@ -127,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .expect("Could't get bot token from configuration file, invalid format");
 
     let http = Http::new_with_token(&bot_token);
-    let (owners, bot_id) = match http.get_current_application_info().await {
+    let (owners, _bot_id) = match http.get_current_application_info().await {
         Ok(info) => {
             let mut owners = HashSet::new();
             owners.insert(info.owner.id);
@@ -174,39 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Set current time as the uptime.
         data.insert::<Uptime>(Instant::now());
-
         // Add the VoiceGuild set.
-        data.insert::<VoiceGuildUpdate>(Arc::new(RwLock::new(HashSet::new())));
-
-        // Initialize and add Lavalink.
-        {
-            let host = configuration["lavalink"]["host"].as_str().unwrap();
-            let port = configuration["lavalink"]["port"].as_integer().unwrap();
-            let password = configuration["lavalink"]["password"].as_str().unwrap();
-
-            let mut counter: i32 = 0;
-            loop {
-                counter += 1;
-                if counter == 10 {
-                    panic!("Could not connect to lavalink after 10 tries, exiting!")
-                }
-                let mut lava_client = LavalinkClient::new(bot_id);
-                lava_client.set_host(host.to_string());
-                lava_client.set_password(password.to_string());
-                lava_client.set_port(port.try_into().unwrap());
-                match lava_client.initialize(LavalinkHandler).await {
-                    Ok(lava) => {
-                        data.insert::<Lavalink>(lava);
-                        info!("Lavalink initialized");
-                        break;
-                    }
-                    Err(why) => {
-                        error!("Could not connect to lavalink, retrying: {:?}", why);
-                        tokio::time::delay_for(Duration::from_secs(5)).await;
-                    }
-                }
-            }
-        }
+        data.insert::<PlayerManager>(Arc::new(RwLock::new(HashMap::new())));
     }
 
     // start listening for events by starting a single shard

@@ -1,11 +1,10 @@
-use crate::{database::Guild, service::service_loop, Config, MongoClient, VoiceGuildUpdate};
+use crate::{database::Guild, service::service_loop, Config, MongoClient};
 use regex::Regex;
 use reqwest::Client as ReqwestClient;
 use serenity::{
     async_trait,
     model::{
         channel::Message,
-        event::VoiceServerUpdateEvent,
         gateway::Ready,
         guild::{Guild as DiscordGuild, Member as DiscordMember, PartialGuild, Role},
         id::{GuildId, RoleId},
@@ -86,15 +85,6 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn voice_server_update(&self, ctx: Context, voice: VoiceServerUpdateEvent) {
-        if let Some(guild_id) = voice.guild_id {
-            let data = ctx.data.read().await;
-            let voice_server_lock = data.get::<VoiceGuildUpdate>().unwrap();
-            let mut voice_server = voice_server_lock.write().await;
-            voice_server.insert(guild_id);
-        }
-    }
-
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
         let guild_id = guild.id.0 as i64;
         let data_read = ctx.data.read().await;
@@ -107,8 +97,8 @@ impl EventHandler for Handler {
             let mut _guild = Guild::new(guild_id, p);
             guild.members.iter().for_each(|(id, m)| {
                 if !m.user.bot {
-                    if let Err(why) = _guild.add_member(id.0 as i64) {
-                        error!("{}", why);
+                    if let Err(e) = _guild.add_member(id.0 as i64) {
+                        error!("{:?}", e);
                     }
                 }
             });

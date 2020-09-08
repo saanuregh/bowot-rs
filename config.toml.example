@@ -5,10 +5,5 @@ token = "secret"
 trace_level = "info" # error, warn, info, debug, trace
 enable_service = true 
 
-[lavalink]
-host = "127.0.0.1"
-password = "youshallnotpass"
-port = 2333
-
 [database]
 uri = "mongo uri"

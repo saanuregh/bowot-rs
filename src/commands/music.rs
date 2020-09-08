@@ -1,41 +1,22 @@
-use crate::{utils::spotify::get_spotify_tracks, Lavalink, VoiceGuildUpdate, VoiceManager};
-
-use std::{sync::Arc, time::Duration};
-
+use crate::{
+    player::{Player, Repeat, Track},
+    PlayerManager, VoiceManager,
+};
+use regex::Regex;
+use serde_json;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     model::{channel::Message, misc::Mentionable},
     prelude::Context,
+    voice,
 };
+use std::{sync::Arc, time::Duration};
+use tracing::error;
+use youtube_dl::YoutubeDl;
 
-use lavalink_rs::{model::Track, LavalinkClient};
-
-use regex::Regex;
-use serde_json;
-
-use failure::Error;
-use failure::Fail;
-
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-
-//use tracing::{
-//    //Log macros.
-//    info,
-//    trace,
-//    debug,
-//    warn,
-//    error,
-//};
-
-#[derive(Debug, Fail)]
-#[fail(display = "Not in a voice channel.")]
-struct JoinError;
-
-pub async fn _join(ctx: &Context, msg: &Message) -> Result<String, Error> {
+pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
     let guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
-
     let channel_id = guild
         .voice_states
         .get(&msg.author.id)
@@ -44,13 +25,9 @@ pub async fn _join(ctx: &Context, msg: &Message) -> Result<String, Error> {
     let connect_to = match channel_id {
         Some(channel) => channel,
         None => {
-            msg.reply(ctx, "You are not connected to a voice channel")
-                .await?;
-
-            return Err(JoinError.into());
+            return None;
         }
     };
-
     let manager_lock = ctx
         .data
         .read()
@@ -59,47 +36,18 @@ pub async fn _join(ctx: &Context, msg: &Message) -> Result<String, Error> {
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
     let mut manager = manager_lock.lock().await;
-    let has_joined = manager.join(guild_id, connect_to).is_some();
-
-    if has_joined {
-        drop(manager);
-
-        loop {
-            let data = ctx.data.read().await;
-            let vgu_lock = data.get::<VoiceGuildUpdate>().unwrap();
-            let mut vgu = vgu_lock.write().await;
-            if !vgu.contains(&guild_id) {
-                tokio::time::delay_for(Duration::from_millis(500)).await;
-            } else {
-                vgu.remove(&guild_id);
-                break;
-            }
-        }
-
-        let manager_lock = ctx
-            .data
-            .read()
-            .await
-            .get::<VoiceManager>()
+    if manager.join(guild_id, connect_to).is_some() {
+        let data = ctx.data.read().await;
+        let pm_lock = data
+            .get::<PlayerManager>()
             .cloned()
-            .expect("Expected VoiceManager in TypeMap.");
-        let manager = manager_lock.lock().await;
+            .expect("Expected PlayerManager in TypeMap");
+        let mut pm = pm_lock.write().await;
+        pm.insert(guild_id.0 as u64, Player::new(guild_id));
 
-        let mut data = ctx.data.write().await;
-        let lava_client_lock = data
-            .get_mut::<Lavalink>()
-            .expect("Expected a lavalink client in TypeMap");
-        let handler = manager.get(guild_id).unwrap();
-        lava_client_lock
-            .lock()
-            .await
-            .create_session(guild_id, &handler)
-            .await?;
-
-        Ok(connect_to.mention())
+        Some(connect_to.mention())
     } else {
-        msg.channel_id.say(ctx, "Error joining the channel").await?;
-        Err(JoinError.into())
+        None
     }
 }
 
@@ -107,279 +55,14 @@ pub async fn _join(ctx: &Context, msg: &Message) -> Result<String, Error> {
 #[command]
 #[aliases("connect")]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    let channel = _join(ctx, msg).await?;
-    msg.channel_id
-        .say(ctx, &format!("Joined {}", channel))
-        .await?;
-
-    Ok(())
-}
-
-/// Shuffles the order of the current queue.
-#[command]
-#[aliases(randomize)]
-async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-    if let Some(node) = lava_client.nodes.get_mut(&msg.guild_id.unwrap().0) {
-        {
-            let mut rng = thread_rng();
-            let mut queue = node.queue.clone();
-            queue.shuffle(&mut rng);
-            node.queue = queue.clone();
-        }
-        msg.react(ctx, '✅').await?;
-    };
-
-    Ok(())
-}
-
-/// Skips the current song being played.
-///
-/// NOTE: will not skip if there's no more songs in the queue.
-/// Use `stop` or `pause` instad.
-#[command]
-#[aliases(next)]
-async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-
-    if let Some(track) = lava_client.skip(msg.guild_id.unwrap()).await {
-        let track_info = track.track.info.as_ref().unwrap();
-        msg.channel_id
-            .send_message(ctx, |m| {
-                m.content("Skipped:");
-                m.embed(|e| {
-                    e.title(&track_info.title);
-                    e.thumbnail(format!(
-                        "https://i.ytimg.com/vi/{}/default.jpg",
-                        &track_info.identifier
-                    ));
-                    e.url(&track_info.uri);
-                    e.footer(|f| f.text(format!("Submited by unknown")));
-                    e.field("Uploader", &track_info.author, true);
-                    e.field(
-                        "Length",
-                        format!("{}:{}", track_info.length / 1000 % 3600 / 60, {
-                            let x = track_info.length / 1000 % 3600 % 60;
-                            if x < 10 {
-                                format!("0{}", x)
-                            } else {
-                                x.to_string()
-                            }
-                        }),
-                        true,
-                    );
-                    e
-                })
-            })
-            .await?;
-        let node = lava_client.nodes.get(&msg.guild_id.unwrap().0).unwrap();
-        if node.queue.is_empty() && node.now_playing.is_none() {
-            lava_client.stop(msg.guild_id.unwrap()).await?;
-        }
-    } else {
-        msg.channel_id.say(ctx, "Nothing to skip.").await?;
-    }
-
-    Ok(())
-}
-
-/// Displays the current song queue.
-#[command]
-#[aliases(que)]
-async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-    if let Some(node) = lava_client.nodes.get_mut(&msg.guild_id.unwrap().0) {
-        if !node.queue.is_empty() {
-            let mut queue = String::from("```st\n");
-            for (index, track) in node.queue.iter().skip(1).take(10).enumerate() {
-                queue += &format!(
-                    "{}: {}\n",
-                    index + 1,
-                    track.track.info.as_ref().unwrap().title
-                );
-            }
-            if node.queue.len() > 10 {
-                queue += &format!("... {}", node.queue.len());
-            }
-
-            queue += "\n```";
-
-            queue = queue.replace("@", "@\u{200B}");
-
-            msg.channel_id.say(ctx, &queue).await?;
-        } else {
-            msg.channel_id.say(ctx, "The queue is empty.").await?;
-        }
-    };
-
-    Ok(())
-}
-
-/// Clears the current queue.
-#[command]
-#[aliases(cque, clearqueue, clearque, cqueue)]
-async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-    if let Some(node) = lava_client.nodes.get_mut(&msg.guild_id.unwrap().0) {
-        if !node.queue.is_empty() {
-            node.queue = vec![];
-
+    match _join(ctx, msg).await {
+        Some(_) => {
             msg.react(ctx, '✅').await?;
-        } else {
-            msg.channel_id
-                .say(ctx, "The queue is already empty.")
-                .await?;
         }
-    };
-
-    Ok(())
-}
-
-/// Displays the information about the currently playing song.
-#[command]
-#[aliases(np, nowplaying, playing)]
-async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let lava_client = lava_client_lock.lock().await;
-
-    if let Some(node) = lava_client.nodes.get(&msg.guild_id.unwrap().0) {
-        let track = node.now_playing.as_ref();
-        if let Some(x) = track {
-            let track_info = x.track.info.as_ref().unwrap();
-            msg.channel_id
-                .send_message(ctx, |m| {
-                    m.content("Now playing:");
-                    m.embed(|e| {
-                        e.title(&track_info.title);
-                        e.thumbnail(format!(
-                            "https://i.ytimg.com/vi/{}/default.jpg",
-                            track_info.identifier
-                        ));
-                        e.url(&track_info.uri);
-                        e.footer(|f| f.text(format!("Submited by unknown")));
-                        e.field("Uploader", &track_info.author, true);
-                        e.field(
-                            "Length",
-                            format!("{}:{}", track_info.length / 1000 % 3600 / 60, {
-                                let x = track_info.length / 1000 % 3600 % 60;
-                                if x < 10 {
-                                    format!("0{}", x)
-                                } else {
-                                    x.to_string()
-                                }
-                            }),
-                            true,
-                        );
-                        e
-                    })
-                })
-                .await?;
-        } else {
-            msg.channel_id
-                .say(ctx, "Nothing is playing at the moment.")
-                .await?;
+        None => {
+            msg.channel_id.say(ctx, "Not in a voice channel").await?;
         }
-    } else {
-        msg.channel_id
-            .say(ctx, "Nothing is playing at the moment.")
-            .await?;
     }
-
-    Ok(())
-}
-
-/// Jumps to the specific time in seconds to the currently playing song.
-#[command]
-#[min_args(1)]
-#[aliases(jump_to, jumpto, scrub)]
-async fn seek(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let num = if let Ok(x) = args.single::<u64>() {
-        x
-    } else {
-        msg.reply(&ctx.http, "Provide a valid number of seconds.")
-            .await?;
-        return Ok(());
-    };
-
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-
-    lava_client
-        .seek(msg.guild_id.unwrap(), Duration::from_secs(num))
-        .await?;
-
-    msg.react(ctx, '✅').await?;
-
-    Ok(())
-}
-
-/// Stops the current player.
-#[command]
-async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-
-    lava_client.stop(msg.guild_id.unwrap()).await?;
-
-    msg.react(ctx, '✅').await?;
-
-    Ok(())
-}
-
-/// Pauses the current player.
-#[command]
-async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-
-    lava_client.set_pause(msg.guild_id.unwrap(), true).await?;
-
-    msg.react(ctx, '✅').await?;
-
-    Ok(())
-}
-
-/// Resumes the current player.
-#[command]
-#[aliases(unpause)]
-async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
-    let data = ctx.data.read().await;
-    let lava_client_lock = data
-        .get::<Lavalink>()
-        .expect("Expected a lavalink client in TypeMap");
-    let mut lava_client = lava_client_lock.lock().await;
-
-    lava_client.set_pause(msg.guild_id.unwrap(), false).await?;
-
-    msg.react(ctx, '✅').await?;
 
     Ok(())
 }
@@ -387,12 +70,7 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
 /// Disconnects me from the voice channel if im in one.
 #[command]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = ctx
-        .cache
-        .guild_channel_field(msg.channel_id, |channel| channel.guild_id)
-        .await
-        .unwrap();
-
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let manager_lock = ctx
         .data
         .read()
@@ -401,20 +79,92 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
     let mut manager = manager_lock.lock().await;
-    let has_handler = manager.get(guild_id).is_some();
-
-    if has_handler {
+    if manager.get(guild_id).is_some() {
         manager.remove(guild_id);
-
-        let mut data = ctx.data.write().await;
-        let lava_client_lock = data
-            .get_mut::<Lavalink>()
-            .expect("Expected a lavalink client in TypeMap");
-        lava_client_lock.lock().await.destroy(guild_id).await?;
-
         msg.react(ctx, '✅').await?;
     } else {
-        msg.reply(ctx, "Not in a voice channel").await?;
+        msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+    }
+
+    Ok(())
+}
+
+/// Show the song queue.
+#[command]
+async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let player_lock = ctx
+        .data
+        .read()
+        .await
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let pm = player_lock.read().await;
+    let player = pm
+        .get(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    let queue = player.clone().queue;
+    if !queue.is_empty() {
+        let mut queue_str = String::from("```st\n");
+        queue_str += &format!("Now playing: {}\n", queue[0].title);
+        for (index, track) in queue[1..].iter().take(10).enumerate() {
+            queue_str += &format!("{}: {}\n", index + 1, track.title);
+        }
+        if queue.len() > 10 {
+            queue_str += &format!("... {}", queue.len());
+        }
+        queue_str += "\n```";
+        queue_str = queue_str.replace("@", "@\u{200B}");
+        msg.channel_id.say(ctx, &queue_str).await?;
+    } else {
+        msg.channel_id.say(ctx, "The queue is empty").await?;
+    }
+
+    Ok(())
+}
+
+/// Clears the song queue.
+#[command]
+async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.clone().is_empty() {
+        player.clear_except_np();
+        msg.react(ctx, '✅').await?;
+    } else {
+        msg.channel_id.say(ctx, "The queue is empty").await?;
+    }
+
+    Ok(())
+}
+
+/// Shuffles the song queue.
+#[command]
+async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.clone().is_empty() {
+        player.shuffle();
+        msg.react(ctx, '✅').await?;
+    } else {
+        msg.channel_id.say(ctx, "The queue is empty").await?;
     }
 
     Ok(())
@@ -435,7 +185,6 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         let re = Regex::new("[<>]").unwrap();
         query = re.replace_all(&query, "").into_owned();
     }
-
     if !embeded {
         if let Err(_) = ctx
             .http
@@ -453,18 +202,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             }
         }
     }
-
-    let guild_id = match ctx.cache.guild_channel(msg.channel_id).await {
-        Some(channel) => channel.guild_id,
-        None => {
-            msg.channel_id
-                .say(ctx, "Error finding channel info")
-                .await?;
-
-            return Ok(());
-        }
-    };
-
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let manager_lock = ctx
         .data
         .read()
@@ -472,303 +210,424 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock().await;
-
-    if let Some(_handler) = manager.get_mut(guild_id) {
-        let data = ctx.data.read().await;
-        let lava_lock = data
-            .get::<Lavalink>()
-            .expect("Expected a lavalink client in TypeMap");
-        let lava_client = lava_lock.lock().await;
-
-        let mut iter = 0;
-        let query_information = loop {
-            iter += 1;
-            let res = lava_client.auto_search_tracks(&query).await?;
-
-            if res.tracks.is_empty() {
-                if iter == 5 {
-                    msg.channel_id
-                        .say(&ctx, "Could not find any video of the search query.")
-                        .await?;
+    let manager = manager_lock.lock().await;
+    let has_joined = manager.get(guild_id).is_some();
+    if !has_joined {
+        drop(manager);
+        _join(ctx, msg).await;
+    }
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected Player Manger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    match YoutubeDl::new(query).run()? {
+        youtube_dl::YoutubeDlOutput::Playlist(p) => {
+            if let Some(playlist) = p.entries {
+                if playlist.is_empty() {
+                    msg.channel_id.say(ctx, "No result.").await?;
                     return Ok(());
                 }
-            } else {
-                if query.starts_with("http") && res.tracks.len() > 1 {
-                    msg.channel_id.say(ctx, "If you would like to play the entire playlist, use `play_playlist` instead.").await?;
+                for s in playlist.clone().into_iter() {
+                    let track = Track {
+                        url: format!("https://www.youtube.com/watch?v={}", s.id),
+                        title: s.title,
+                        requester: msg.author.id,
+                        live: s.is_live.unwrap_or(false),
+                    };
+                    player.add_track(track);
                 }
-                break res;
+                if playlist.len() > 1 {
+                    msg.channel_id
+                        .say(ctx, format!("Queued {} tracks", playlist.len()))
+                        .await?;
+                } else {
+                    msg.channel_id
+                        .say(ctx, format!("Queued - {}", playlist.first().unwrap().title))
+                        .await?;
+                }
+            }
+        }
+        youtube_dl::YoutubeDlOutput::SingleVideo(s) => {
+            let track = Track {
+                url: s.webpage_url.unwrap(),
+                title: s.title.clone(),
+                requester: msg.author.id,
+                live: s.is_live.unwrap_or(false),
+            };
+            player.add_track(track);
+            msg.channel_id
+                .say(ctx, format!("Queued - {}", s.title))
+                .await?;
+        }
+    }
+
+    if player.is_finished().await {
+        let ctx_arc = Arc::new(ctx.clone());
+        let msg_arc = Arc::new(msg.clone());
+        tokio::spawn(async move {
+            _player_worker(ctx_arc, msg_arc).await;
+        });
+    }
+
+    Ok(())
+}
+
+async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    loop {
+        let data = ctx.data.read().await;
+        let player_lock = data
+            .get::<PlayerManager>()
+            .cloned()
+            .expect("Expected Player Manger in TypeMap");
+        let mut pm = player_lock.write().await;
+        let player = pm
+            .get_mut(&(guild_id.0 as u64))
+            .expect("No player for this guild available");
+        if player.clone().is_empty() {
+            if let Err(why) = msg.channel_id.say(ctx.clone(), "Stopping playback").await {
+                error!("Player Worker: {:?}", why)
+            }
+            break;
+        }
+        let now_playing = player.clone().queue.first().cloned().unwrap();
+        if let Err(why) = msg
+            .channel_id
+            .send_message(ctx.clone(), |m| {
+                m.content("Now playing:");
+                m.embed(|e| {
+                    e.title(&now_playing.title);
+                    e.url(&now_playing.url);
+                    e.field("Requester", now_playing.requester.mention(), true);
+                    e.field("Live", now_playing.live, true);
+                    e
+                })
+            })
+            .await
+        {
+            error!("Player Worker: {:?}", why)
+        }
+        let source = match voice::ytdl(now_playing.url.as_str()).await {
+            Ok(source) => source,
+            Err(_) => {
+                continue;
             }
         };
+        let manager_lock = data
+            .get::<VoiceManager>()
+            .cloned()
+            .expect("Expected VoiceManager in ShareMap.");
+        let mut manager = manager_lock.lock().await;
+        let handler = manager.get_mut(guild_id).unwrap();
+        let now_source = handler.play_only(source);
+        player.set_now_source(now_source);
+        drop(manager);
+        drop(pm);
+        loop {
+            let player_lock_2 = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected Player Manger in TypeMap");
+            let mut pm_2 = player_lock_2.write().await;
+            let player_2 = pm_2
+                .get_mut(&(guild_id.0 as u64))
+                .expect("No player for this guild available");
+            if player_2.is_finished().await {
+                match player_2.repeat {
+                    Repeat::Off => {
+                        player_2.pop();
+                    }
+                    Repeat::One => {}
+                    Repeat::All => {
+                        if let Some(t) = player_2.pop() {
+                            player_2.push(t);
+                        }
+                    }
+                }
 
-        drop(lava_client);
+                break;
+            }
+            drop(pm_2);
+            tokio::time::delay_for(Duration::from_millis(500)).await;
+        }
+    }
+}
 
-        LavalinkClient::play(guild_id, query_information.tracks[0].clone())
-            .queue(Arc::clone(lava_lock))
-            .await?;
+/// Skips the current song being played.
+#[command]
+#[aliases(next)]
+async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager_lock = ctx
+        .data
+        .read()
+        .await
+        .get::<VoiceManager>()
+        .cloned()
+        .expect("Expected VoiceManager in TypeMap.");
+    let mut manager = manager_lock.lock().await;
+    match manager.get_mut(guild_id) {
+        Some(handler) => {
+            let data = ctx.data.read().await;
+            let player_lock = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected PlayerManger in TypeMap");
+            let mut pm = player_lock.write().await;
+            let player = pm
+                .get_mut(&(guild_id.0 as u64))
+                .expect("No player for this guild available");
+            if !player.is_finished().await {
+                player.reset();
+                handler.stop();
+                msg.react(ctx, '✅').await?;
+            } else {
+                msg.channel_id.say(ctx, "Nothing playing").await?;
+            }
+        }
+        None => {
+            msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        }
+    }
 
+    Ok(())
+}
+
+/// Pauses the current song.
+#[command]
+async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager_lock = ctx
+        .data
+        .read()
+        .await
+        .get::<VoiceManager>()
+        .cloned()
+        .expect("Expected VoiceManager in TypeMap.");
+    let mut manager = manager_lock.lock().await;
+    match manager.get_mut(guild_id) {
+        Some(_) => {
+            let data = ctx.data.read().await;
+            let player_lock = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected Player    Manger in TypeMap");
+            let mut pm = player_lock.write().await;
+            let player = pm
+                .get_mut(&(guild_id.0 as u64))
+                .expect("No player for this guild available");
+            if !player.is_finished().await {
+                if player.is_paused().await {
+                    msg.channel_id.say(ctx, "Already paused").await?;
+                } else {
+                    player.pause().await;
+                    msg.react(ctx, '✅').await?;
+                }
+            } else {
+                msg.channel_id.say(ctx, "Nothing playing").await?;
+            }
+        }
+        None => {
+            msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Resumes the current song.
+#[command]
+#[aliases(unpause)]
+async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager_lock = ctx
+        .data
+        .read()
+        .await
+        .get::<VoiceManager>()
+        .cloned()
+        .expect("Expected VoiceManager in TypeMap.");
+    let mut manager = manager_lock.lock().await;
+    match manager.get_mut(guild_id) {
+        Some(_) => {
+            let data = ctx.data.read().await;
+            let player_lock = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected Player    Manger in TypeMap");
+            let mut pm = player_lock.write().await;
+            let player = pm
+                .get_mut(&(guild_id.0 as u64))
+                .expect("No player for this guild available");
+            if !player.is_finished().await {
+                if !player.is_paused().await {
+                    msg.channel_id.say(ctx, "Already playing").await?;
+                } else {
+                    player.play().await;
+                    msg.react(ctx, '✅').await?;
+                }
+            } else {
+                msg.channel_id.say(ctx, "Nothing playing").await?;
+            }
+        }
+        None => {
+            msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Stops the current player (clears song queue).
+#[command]
+async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager_lock = ctx
+        .data
+        .read()
+        .await
+        .get::<VoiceManager>()
+        .cloned()
+        .expect("Expected VoiceManager in TypeMap.");
+    let mut manager = manager_lock.lock().await;
+    match manager.get_mut(guild_id) {
+        Some(handler) => {
+            let data = ctx.data.read().await;
+            let player_lock = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected PlayerManger in TypeMap");
+            let mut pm = player_lock.write().await;
+            let player = pm
+                .get_mut(&(guild_id.0 as u64))
+                .expect("No player for this guild available");
+            if !player.is_finished().await {
+                player.clear();
+                player.reset();
+                handler.stop();
+                msg.react(ctx, '✅').await?;
+            } else {
+                msg.channel_id.say(ctx, "Nothing playing").await?;
+            }
+        }
+        None => {
+            msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Displays the information about the currently playing song.
+#[command]
+#[aliases(np, nowplaying, playing)]
+async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.is_finished().await {
+        let now_playing = player.clone().queue.first().cloned().unwrap();
         msg.channel_id
-            .send_message(ctx, |m| {
-                m.content("Added to queue:");
+            .send_message(ctx.clone(), |m| {
+                m.content("Now playing:");
                 m.embed(|e| {
-                    e.title(&query_information.tracks[0].info.as_ref().unwrap().title);
-                    e.thumbnail(format!(
-                        "https://i.ytimg.com/vi/{}/default.jpg",
-                        query_information.tracks[0]
-                            .info
-                            .as_ref()
-                            .unwrap()
-                            .identifier
-                    ));
-                    e.url(&query_information.tracks[0].info.as_ref().unwrap().uri);
-                    e.footer(|f| f.text(format!("Submited by {}", &msg.author.name)));
-                    e.field(
-                        "Uploader",
-                        &query_information.tracks[0].info.as_ref().unwrap().author,
-                        true,
-                    );
-                    e.field(
-                        "Length",
-                        format!(
-                            "{}:{}",
-                            query_information.tracks[0].info.as_ref().unwrap().length / 1000 % 3600
-                                / 60,
-                            {
-                                let x = query_information.tracks[0].info.as_ref().unwrap().length
-                                    / 1000
-                                    % 3600
-                                    % 60;
-                                if x < 10 {
-                                    format!("0{}", x)
-                                } else {
-                                    x.to_string()
-                                }
-                            }
-                        ),
-                        true,
-                    );
+                    e.title(&now_playing.title);
+                    e.url(&now_playing.url);
+                    e.field("Requester", now_playing.requester.mention(), true);
+                    e.field("Live", now_playing.live, true);
                     e
                 })
             })
             .await?;
     } else {
-        msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        msg.channel_id.say(ctx, "Nothing playing").await?;
     }
 
     Ok(())
 }
 
-/// Adds an entire playlist to the queue.
+/// Change repeat mode.
 ///
-/// Usage: `play https://www.youtube.com/playlist?list=PLTktV6LgA75yif8RR7yUiSttZD7GKtl_5`
+/// Usage: `repeat <one|all|off>`
+/// or `repeat one`
 #[command]
-#[min_args(1)]
-#[aliases(playlist, playplaylist, play_list, pl, playl, plist)]
-async fn play_playlist(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut embeded = false;
-    let mut query = args.message().to_string();
-
-    if query.starts_with('<') && query.ends_with('>') {
-        embeded = true;
-        let re = Regex::new("[<>]").unwrap();
-        query = re.replace_all(&query, "").into_owned();
+#[num_args(1)]
+async fn repeat(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mode = args.message();
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    match mode {
+        "one" => {
+            player.set_repeat(Repeat::One);
+            msg.react(ctx, '🔂').await?;
+        }
+        "all" => {
+            player.set_repeat(Repeat::All);
+            msg.react(ctx, '🔁').await?;
+        }
+        "off" => {
+            player.set_repeat(Repeat::Off);
+            msg.react(ctx, '✅').await?;
+        }
+        _ => {
+            msg.channel_id.say(ctx, "Invalid repeat mode").await?;
+        }
     }
 
-    if !embeded {
-        if let Err(_) = ctx
-            .http
-            .edit_message(
-                msg.channel_id.0,
-                msg.id.0,
-                &serde_json::json!({"flags" : 4}),
-            )
-            .await
-        {
-            if query.starts_with("http") {
+    Ok(())
+}
+
+/// Remove a song from queue.
+///
+/// Usage: `remove <index>`
+/// or `remove 1`
+#[command]
+#[num_args(1)]
+async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let index = args.single::<usize>().unwrap();
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let data = ctx.data.read().await;
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.clone().is_empty() {
+        match player.remove_track(index) {
+            Some(t) => {
                 msg.channel_id
-                    .say(ctx, "Please, put the url between <> so it doesn't embed.")
+                    .say(ctx, format!("Removed - {}", t.title))
                     .await?;
             }
-        }
-    }
-
-    let guild_id = match ctx.cache.guild_channel(msg.channel_id).await {
-        Some(channel) => channel.guild_id,
-        None => {
-            msg.channel_id
-                .say(ctx, "Error finding channel info")
-                .await?;
-
-            return Ok(());
-        }
-    };
-
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock().await;
-
-    if let Some(_handler) = manager.get_mut(guild_id) {
-        let data = ctx.data.read().await;
-        let lava_lock = data
-            .get::<Lavalink>()
-            .expect("Expected a lavalink client in TypeMap");
-        let lava_client = lava_lock.lock().await;
-
-        let mut iter = 0;
-        let query_information = loop {
-            iter += 1;
-            let res = lava_client.auto_search_tracks(&query).await?;
-
-            if res.tracks.is_empty() {
-                if iter == 5 {
-                    msg.channel_id
-                        .say(&ctx, "Could not find any video of the search query.")
-                        .await?;
-                    return Ok(());
-                }
-            } else {
-                break res;
-            }
-        };
-
-        drop(lava_client);
-
-        for track in query_information.clone().tracks {
-            LavalinkClient::play(guild_id, track.clone())
-                .queue(Arc::clone(lava_lock))
-                .await?;
-        }
-
-        msg.channel_id
-            .send_message(ctx, |m| {
-                m.content("Added playlist to queue.");
-                m.embed(|e| {
-                    e.title(
-                        query_information
-                            .playlist_info
-                            .name
-                            .unwrap_or("Playlist".to_string()),
-                    );
-                    e.url(query);
-                    e.footer(|f| f.text(format!("Submited by {}", &msg.author.name)))
-                })
-            })
-            .await?;
-    } else {
-        msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
-    }
-
-    Ok(())
-}
-
-/// Adds an entire spotify playlist to the queue.
-///
-/// Usage: `play_spotify https://open.spotify.com/playlist/1uoJah7SRmx6wFVXKsyynB?si=pnl8uHdoTryEfj_k0yyckA`
-#[command]
-#[min_args(1)]
-#[aliases(spotify)]
-async fn play_spotify(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut embeded = false;
-    let mut query = args.message().to_string();
-    if query.starts_with('<') && query.ends_with('>') {
-        embeded = true;
-        let re = Regex::new("[<>]").unwrap();
-        query = re.replace_all(&query, "").into_owned();
-    }
-    if !query.starts_with("http") {
-        msg.reply(ctx, "Provide a valid URL").await?;
-        return Ok(());
-    }
-    if !embeded {
-        if let Err(_) = ctx
-            .http
-            .edit_message(
-                msg.channel_id.0,
-                msg.id.0,
-                &serde_json::json!({"flags" : 4}),
-            )
-            .await
-        {
-            msg.channel_id
-                .say(ctx, "Please, put the url between <> so it doesn't embed.")
-                .await?;
-        }
-    }
-
-    let guild_id = match ctx.cache.guild_channel(msg.channel_id).await {
-        Some(channel) => channel.guild_id,
-        None => {
-            msg.channel_id
-                .say(ctx, "Error finding channel info")
-                .await?;
-
-            return Ok(());
-        }
-    };
-
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in ShareMap.");
-    let mut manager = manager_lock.lock().await;
-
-    if let Some(_handler) = manager.get_mut(guild_id) {
-        let data = ctx.data.read().await;
-        let lava_lock = data
-            .get::<Lavalink>()
-            .expect("Expected a lavalink client in TypeMap");
-        let lava_client = lava_lock.lock().await;
-        let mut tracks: Vec<Track> = Vec::new();
-        let (playlist_name, spotify_tracks) = get_spotify_tracks(query.clone())
-            .await
-            .expect("Couldn't get tracks from spotify");
-        {
-            for spotify_track in spotify_tracks {
-                let query_information = lava_client.auto_search_tracks(spotify_track).await?;
-                if !query_information.tracks.is_empty() {
-                    tracks.push(query_information.tracks[0].clone());
-                }
+            None => {
+                msg.channel_id.say(ctx, "Out of bounds").await?;
             }
         }
-
-        drop(lava_client);
-
-        if tracks.is_empty() {
-            msg.channel_id
-                .say(
-                    ctx,
-                    "Empty playlist or couldn't obtain playlist items successfully.",
-                )
-                .await?;
-            return Ok(());
-        }
-
-        for track in tracks {
-            LavalinkClient::play(guild_id, track.clone())
-                .queue(Arc::clone(lava_lock))
-                .await?;
-        }
-
-        msg.channel_id
-            .send_message(ctx, |m| {
-                m.content("Added playlist to queue.");
-                m.embed(|e| {
-                    e.title(playlist_name);
-                    e.url(query);
-                    e.footer(|f| f.text(format!("Submited by {}", &msg.author.name)))
-                })
-            })
-            .await?;
     } else {
-        msg.channel_id.say(ctx, "Please, connect the bot to the voice channel you are currently on first with the `join` command.").await?;
+        msg.channel_id.say(ctx, "The queue is empty").await?;
     }
 
     Ok(())

@@ -31,7 +31,7 @@ tracing-log = "0.1.1"
 tracing-subscriber = "0.2.11"
 walkdir = "2.3.1"
 wither = { version = "0.9.0-alpha.1", default-features = false, features = ["tokio-runtime"] }
-lavalink-rs = "0.1.4-alpha"
+youtube_dl = {git = "https://github.com/saanuregh/youtube-dl-rs.git", branch= "search"}
 
 [dependencies.serenity]
 version = "0.9.0-rc.1"

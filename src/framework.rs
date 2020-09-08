@@ -4,7 +4,7 @@ use crate::{
         reddit::*, roleplay::*,
     },
     database::*,
-    Config, MongoClient, VoiceManager,
+    Config, MongoClient,
 };
 
 use serenity::{
@@ -96,16 +96,15 @@ struct Hydrate;
     join,
     leave,
     play,
-    play_playlist,
-    play_spotify,
     pause,
     resume,
     stop,
     skip,
-    seek,
     shuffle,
     queue,
     clear_queue,
+    repeat,
+    remove,
     now_playing
 )]
 struct Music;
@@ -182,7 +181,10 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
             let _ = msg
                 .reply(
                     ctx,
-                    format!("You can't run this command for {} more seconds.", x.as_secs()),
+                    format!(
+                        "You can't run this command for {} more seconds.",
+                        x.as_secs()
+                    ),
                 )
                 .await;
         }
@@ -207,27 +209,6 @@ async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
                     )
                     .await;
                 return false;
-            }
-        }
-        if cmd_name == "play" || cmd_name == "play_playlist" || cmd_name == "play_spotify" {
-            let manager_lock = ctx
-                .data
-                .read()
-                .await
-                .get::<VoiceManager>()
-                .cloned()
-                .expect("Expected VoiceManager in ShareMap.");
-            let manager = manager_lock.lock().await;
-
-            if manager.get(guild_id).is_none() {
-                drop(manager);
-                drop(data_read);
-
-                if let Err(why) = _join(ctx, msg).await {
-                    error!("While running command: {}", cmd_name);
-                    error!("{:?}", why);
-                    return false;
-                }
             }
         }
     }
