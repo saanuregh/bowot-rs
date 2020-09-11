@@ -125,8 +125,7 @@ struct Configuration;
 #[help]
 #[individual_command_tip = "Hello!
 If youd like to get more information about a specific command or group, you can just pass it as a command argument.
-All the command examples through out the help will be shown without prefix, use whatever prefix is configured on the server instead.
-You can react with 🚫 on *any* message sent by the bot to delete it.\n"]
+All the command examples through out the help will be shown without prefix, use whatever prefix is configured on the server instead.\n"]
 #[command_not_found_text = "Could not find: `{}`."]
 #[strikethrough_commands_tip_in_dm = "~~`Strikethrough commands`~~ are unavailabe because the bot is unable to run them."]
 #[strikethrough_commands_tip_in_guild = "~~`Strikethrough commands`~~ are unavailabe because the bot is unable to run them."]
