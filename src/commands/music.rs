@@ -225,47 +225,55 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let player = pm
         .get_mut(&(guild_id.0 as u64))
         .expect("No player for this guild available");
-    match YoutubeDl::new(query).run()? {
-        youtube_dl::YoutubeDlOutput::Playlist(p) => {
-            if let Some(playlist) = p.entries {
-                if playlist.is_empty() {
-                    msg.channel_id.say(ctx, "No result.").await?;
-                    return Ok(());
-                }
-                for s in playlist.clone().into_iter() {
-                    let track = Track {
-                        url: format!("https://www.youtube.com/watch?v={}", s.id),
-                        title: s.title,
-                        requester: msg.author.id,
-                        live: s.is_live.unwrap_or(false),
-                    };
-                    player.add_track(track);
-                }
-                if playlist.len() > 1 {
-                    msg.channel_id
-                        .say(ctx, format!("Queued {} tracks", playlist.len()))
-                        .await?;
-                } else {
-                    msg.channel_id
-                        .say(ctx, format!("Queued - {}", playlist.first().unwrap().title))
-                        .await?;
+    if let Ok(result) = YoutubeDl::new(query).run() {
+        match result {
+            youtube_dl::YoutubeDlOutput::Playlist(p) => {
+                if let Some(playlist) = p.entries {
+                    if playlist.is_empty() {
+                        msg.channel_id
+                            .say(ctx, "Couldn't find any result for the query")
+                            .await?;
+                        return Ok(());
+                    }
+                    for s in playlist.clone().into_iter() {
+                        let track = Track {
+                            url: format!("https://www.youtube.com/watch?v={}", s.id),
+                            title: s.title,
+                            requester: msg.author.id,
+                            live: s.is_live.unwrap_or(false),
+                        };
+                        player.add_track(track);
+                    }
+                    if playlist.len() > 1 {
+                        msg.channel_id
+                            .say(ctx, format!("Queued {} tracks", playlist.len()))
+                            .await?;
+                    } else {
+                        msg.channel_id
+                            .say(ctx, format!("Queued - {}", playlist.first().unwrap().title))
+                            .await?;
+                    }
                 }
             }
+            youtube_dl::YoutubeDlOutput::SingleVideo(s) => {
+                let track = Track {
+                    url: s.webpage_url.unwrap(),
+                    title: s.title.clone(),
+                    requester: msg.author.id,
+                    live: s.is_live.unwrap_or(false),
+                };
+                player.add_track(track);
+                msg.channel_id
+                    .say(ctx, format!("Queued - {}", s.title))
+                    .await?;
+            }
         }
-        youtube_dl::YoutubeDlOutput::SingleVideo(s) => {
-            let track = Track {
-                url: s.webpage_url.unwrap(),
-                title: s.title.clone(),
-                requester: msg.author.id,
-                live: s.is_live.unwrap_or(false),
-            };
-            player.add_track(track);
-            msg.channel_id
-                .say(ctx, format!("Queued - {}", s.title))
-                .await?;
-        }
+    } else {
+        msg.channel_id
+            .say(ctx, "Couldn't find any result for the query")
+            .await?;
+        return Ok(());
     }
-
     if player.is_finished().await {
         let ctx_arc = Arc::new(ctx.clone());
         let msg_arc = Arc::new(msg.clone());
