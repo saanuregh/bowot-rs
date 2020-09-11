@@ -1,9 +1,0 @@
-[bot]
-enable_tracing = false 
-prefix = "%" 
-token = "secret" 
-trace_level = "info" # error, warn, info, debug, trace
-enable_service = true 
-
-[database]
-uri = "mongo uri"

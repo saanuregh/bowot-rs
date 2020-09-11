@@ -1,6 +1,6 @@
-use crate::{database::Guild, service::service_loop, Config, MongoClient};
+use crate::{database::Guild, service::service_loop, MongoClient};
+use itconfig::*;
 use regex::Regex;
-use reqwest::Client as ReqwestClient;
 use serenity::{
     async_trait,
     model::{
@@ -12,7 +12,7 @@ use serenity::{
     },
     prelude::{Context, EventHandler},
 };
-use std::{clone::Clone, collections::HashMap, sync::Arc};
+use std::{clone::Clone, sync::Arc};
 use tracing::{error, info};
 
 pub struct Handler; // Defines the handler to be used for events.
@@ -20,13 +20,10 @@ pub struct Handler; // Defines the handler to be used for events.
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
-        let ctx = Arc::new(ctx);
-        if (ctx.data.read().await.get::<Config>().unwrap()["bot"]["enable_service"]
-            .as_bool()
-            .unwrap_or(false))
-        {
+        let ctx = Arc::new(ctx.clone());
+        if (get_env_or_default::<bool, bool>("ENABLE_SERVICES", true)) {
             info!("Starting services");
-            tokio::join!(service_loop(Arc::clone(&ctx)));
+            tokio::join!(service_loop(ctx));
         }
         info!("{} is ready!", ready.user.name);
     }
@@ -38,16 +35,18 @@ impl EventHandler for Handler {
         }
 
         // Trigger phrase detection and handling.
-        let guild_id = msg.guild_id.unwrap().0 as i64;
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, guild_id).await {
-            for trigger_phrase in guild.trigger_phrases {
-                let re = Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
-                if re.is_match(&msg.content) {
-                    if let Ok(_) = msg.channel_id.say(&ctx, &trigger_phrase.reply).await {
-                        if !trigger_phrase.emote.is_whitespace() {
-                            let _ = msg.react(&ctx, trigger_phrase.emote).await;
+        if let Some(guild_id) = msg.guild_id {
+            let data_read = ctx.data.read().await;
+            let client = data_read.get::<MongoClient>().unwrap();
+            if let Ok(guild) = Guild::from_db(client, guild_id.0 as i64).await {
+                for trigger_phrase in guild.trigger_phrases {
+                    let re =
+                        Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
+                    if re.is_match(&msg.content) {
+                        if let Ok(_) = msg.channel_id.say(&ctx, &trigger_phrase.reply).await {
+                            if !trigger_phrase.emote.is_whitespace() {
+                                let _ = msg.react(&ctx, trigger_phrase.emote).await;
+                            }
                         }
                     }
                 }
@@ -58,31 +57,6 @@ impl EventHandler for Handler {
         if msg.content.to_lowercase() == "no u" {
             let _ = msg.reply(&ctx, "no u").await;
         }
-
-        // Conversational AI when mentioned.
-        if msg.mentions_user_id(ctx.cache.current_user().await.id) {
-            let input = Regex::new("<@[0-9]+>")
-                .unwrap()
-                .replace_all(&msg.content, "")
-                .to_string();
-            let mut map = HashMap::new();
-            map.insert("instance", "18281268");
-            map.insert("application", "2615581203305355564");
-            map.insert("message", &input);
-            let client = ReqwestClient::new();
-            if let Ok(resp) = client
-                .post("https://www.botlibre.com/rest/json/chat")
-                .json(&map)
-                .send()
-                .await
-            {
-                if let Ok(data) = resp.json::<HashMap<String, String>>().await {
-                    if !data["message"].is_empty() {
-                        let _ = msg.reply(&ctx, &data["message"]).await;
-                    }
-                }
-            }
-        }
     }
 
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
@@ -90,10 +64,7 @@ impl EventHandler for Handler {
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
         if let Err(_) = Guild::from_db(client, guild_id).await {
-            let p = data_read.get::<Config>().unwrap()["bot"]["prefix"]
-                .as_str()
-                .unwrap()
-                .to_string();
+            let p = get_env_or_default("PREFIX", "!");
             let mut _guild = Guild::new(guild_id, p);
             guild.members.iter().for_each(|(id, m)| {
                 if !m.user.bot {

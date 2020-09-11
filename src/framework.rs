@@ -4,9 +4,10 @@ use crate::{
         reddit::*, roleplay::*,
     },
     database::*,
-    Config, MongoClient,
+    MongoClient,
 };
 
+use itconfig::*;
 use serenity::{
     framework::standard::{
         help_commands,
@@ -255,10 +256,7 @@ async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command
 #[hook]
 async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     let data = ctx.data.read().await;
-    let mut p = data.get::<Config>().unwrap()["bot"]["prefix"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let mut p = get_env_or_default("PREFIX", "!");
     if let Some(id) = &msg.guild_id {
         let client = data.get::<MongoClient>().unwrap();
         if let Ok(guild) = Guild::from_db(client, id.0 as i64).await {
@@ -269,10 +267,11 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
 }
 
 // Helper function to build serenity command framework
-pub async fn get_framework(owners: HashSet<UserId>) -> StandardFramework {
+pub async fn get_framework(owners: HashSet<UserId>, bot_id: UserId) -> StandardFramework {
     StandardFramework::new()
         .configure(|c| {
             c.allow_dm(false)
+                .on_mention(Some(bot_id))
                 .dynamic_prefix(dynamic_prefix)
                 .owners(owners)
                 .case_insensitivity(true)

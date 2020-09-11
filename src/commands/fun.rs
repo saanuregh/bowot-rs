@@ -429,61 +429,6 @@ async fn calculator(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     Ok(())
 }
 
-// /// Reminds you of a message after some time.
-// ///
-// /// ```
-// /// s -> Second
-// /// m -> Minute
-// /// h -> Hour
-// /// D -> Day
-// /// W -> Week
-// /// M -> Month
-// /// Y -> Year
-// /// ```
-// ///
-// /// Usage:
-// /// `remind_me 2h take the dog out for a walk.`
-// /// `remind_me "2h 30m" mess with the neighbours :P`
-// /// `remind_me "1Y 1M 1W 1D 1h 1m 1s" i bet you forgot about this!`
-// #[command]
-// #[aliases(remindme, reminder, remind, schedule)]
-// #[min_args(1)]
-// async fn remind_me(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-//     let rdata = ctx.data.read().await;
-//     let pool = rdata.get::<ConnectionPool>().unwrap();
-
-//     let unformatted_time = args.single_quoted::<String>()?;
-//     let text = args.rest();
-
-//     let message = if text.is_empty() {
-//         None
-//     } else {
-//         Some(text)
-//     };
-
-//     let seconds = string_to_seconds(unformatted_time);
-
-//     if seconds < 30 {
-//         msg.reply(ctx, "Duration is too short").await?;
-//         return Ok(());
-//     }
-
-//     sqlx::query!("INSERT INTO reminders (date, message_id, channel_id, guild_id, user_id, message) VALUES ($1, $2, $3, $4, $5, $6)",
-//         chrono::offset::Utc::now() + chrono::Duration::seconds(seconds as i64),
-//         msg.id.0 as i64,
-//         msg.channel_id.0 as i64,
-//         msg.guild_id.unwrap_or(GuildId(0)).0 as i64,
-//         msg.author.id.0 as i64,
-//         message,
-//     )
-//     .execute(pool)
-//     .await?;
-
-//     msg.react(ctx, '👍').await?;
-
-//     Ok(())
-// }
-
 /// Gives the definition of a word.
 ///
 /// Usage:

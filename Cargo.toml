@@ -6,7 +6,6 @@ version = "1.0.0"
 [dependencies]
 chrono = "0.4.15"
 comfy-table = "1.1.1"
-dotenv = "0.15.0"
 failure = "0.1.8"
 fasteval = "0.2.4"
 futures = "0.3.5"
@@ -26,7 +25,8 @@ tracing-log = "0.1.1"
 tracing-subscriber = "0.2.11"
 walkdir = "2.3.1"
 wither = { version = "0.9.0-alpha.1", default-features = false, features = ["tokio-runtime"] }
-youtube_dl = {git = "https://github.com/saanuregh/youtube-dl-rs.git", branch= "search"}
+youtube_dl = { git = "https://github.com/saanuregh/youtube-dl-rs.git", branch = "search" }
+itconfig = "1.0"
 
 [dependencies.serenity]
 version = "0.9.0-rc.1"

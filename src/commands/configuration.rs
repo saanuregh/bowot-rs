@@ -1,5 +1,4 @@
-use crate::{Guild, MongoClient, MASTER_GROUP, utils::checks::*};
-use std::time::Duration;
+use crate::{utils::checks::*, Guild, MongoClient, MASTER_GROUP};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use serenity::{
     collector::MessageCollectorBuilder,
@@ -8,6 +7,7 @@ use serenity::{
     model::channel::Message,
     prelude::Context,
 };
+use std::time::Duration;
 
 /// Configures the bot for the guild/server it was invoked on.
 ///
@@ -238,8 +238,11 @@ async fn add_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> Com
         .add_trigger_phrase(phrase.clone(), reply.to_string(), emote)?
         .save_guild(client)
         .await?;
-    msg.reply(ctx, format!("Successfully added trigger phrase `{}`", phrase))
-        .await?;
+    msg.reply(
+        ctx,
+        format!("Successfully added trigger phrase `{}`", phrase),
+    )
+    .await?;
     Ok(())
 }
 

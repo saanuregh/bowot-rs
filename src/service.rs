@@ -1,4 +1,5 @@
-use crate::{get_all_guilds, Config, MongoClient};
+use crate::{get_all_guilds, MongoClient};
+use itconfig::*;
 use rand::seq::SliceRandom;
 use serenity::{
     model::{gateway::Activity, id::UserId, user::OnlineStatus},
@@ -7,6 +8,7 @@ use serenity::{
 use std::collections::HashSet;
 use std::{sync::Arc, time::Duration};
 use tracing::debug;
+use Vec;
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
@@ -39,19 +41,8 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
 }
 
 async fn status_update(ctx: Arc<Context>) {
-    let data = ctx.data.read().await;
-    let config = data.get::<Config>().unwrap();
-    let mut statuses = vec!["uwu", "owo", "raid shadow legends"];
-    if let Some(rc) = config.get("bot") {
-        if let Some(x) = rc.get("statuses") {
-            statuses = x
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|x| x.as_str().unwrap())
-                .collect::<Vec<_>>();
-        }
-    }
+    let status_str: String = get_env_or_default("STATUSES", "uwu,owo,raid shadow legends");
+    let statuses: Vec<&str> = status_str.split(",").collect();
     let random_status = statuses.choose(&mut rand::thread_rng()).unwrap();
     ctx.set_presence(Some(Activity::playing(random_status)), OnlineStatus::Online)
         .await;
@@ -63,15 +54,13 @@ pub async fn service_loop(ctx: Arc<Context>) {
     let ctx_clone2 = Arc::clone(&ctx);
     tokio::spawn(async move {
         loop {
-            let ctx1 = Arc::clone(&ctx_clone1);
-            tokio::join!(hydrate_reminder(Arc::clone(&ctx1)));
+            tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone1)));
             tokio::time::delay_for(Duration::from_secs(2700)).await;
         }
     });
     tokio::spawn(async move {
         loop {
-            let ctx2 = Arc::clone(&ctx_clone2);
-            tokio::join!(status_update(Arc::clone(&ctx2)));
+            tokio::join!(status_update(Arc::clone(&ctx_clone2)));
             tokio::time::delay_for(Duration::from_secs(5)).await;
         }
     });

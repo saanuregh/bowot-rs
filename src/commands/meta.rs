@@ -1,4 +1,4 @@
-use crate::{utils::basic_functions::seconds_to_days, ShardManagerContainer, Uptime};
+use crate::{ShardManagerContainer, Uptime};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
 use serenity::{
@@ -142,7 +142,7 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
         let data = ctx.data.read().await;
         let instant = data.get::<Uptime>().unwrap();
         let duration = instant.elapsed();
-        seconds_to_days(duration.as_secs())
+        humantime::format_duration(duration)
     };
     let map = json!({"content" : "Calculating latency..."});
     let now = Instant::now();
