@@ -21,23 +21,20 @@ use walkdir::WalkDir;
 #[command]
 async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
     let mut permissions = Permissions::empty();
-    permissions.set(Permissions::KICK_MEMBERS, true);
-    permissions.set(Permissions::BAN_MEMBERS, true);
-    permissions.set(Permissions::MANAGE_CHANNELS, true);
-    permissions.set(Permissions::ADD_REACTIONS, true);
-    permissions.set(Permissions::VIEW_AUDIT_LOG, true);
     permissions.set(Permissions::READ_MESSAGES, true);
-    permissions.set(Permissions::SEND_MESSAGES, true);
     permissions.set(Permissions::MANAGE_MESSAGES, true);
-    permissions.set(Permissions::EMBED_LINKS, true);
-    permissions.set(Permissions::ATTACH_FILES, true);
+    permissions.set(Permissions::MANAGE_CHANNELS, true);
+    permissions.set(Permissions::MANAGE_WEBHOOKS, true);
     permissions.set(Permissions::READ_MESSAGE_HISTORY, true);
     permissions.set(Permissions::USE_EXTERNAL_EMOJIS, true);
-    permissions.set(Permissions::CONNECT, true);
+    permissions.set(Permissions::ADD_REACTIONS, true);
+    permissions.set(Permissions::SEND_MESSAGES, true);
     permissions.set(Permissions::SPEAK, true);
+    permissions.set(Permissions::EMBED_LINKS, true);
+    permissions.set(Permissions::CONNECT, true);
     permissions.set(Permissions::MANAGE_ROLES, true);
-    permissions.set(Permissions::MANAGE_WEBHOOKS, true);
-    permissions.set(Permissions::MENTION_EVERYONE, true);
+    permissions.set(Permissions::KICK_MEMBERS, true);
+    permissions.set(Permissions::BAN_MEMBERS, true);
     let url = ctx
         .cache
         .current_user()
@@ -50,17 +47,14 @@ async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
             e.url(url);
             e.description("Keep in mind, this bot is still in pure developement, so not all of this mentioned features are implemented.\n\n__**Reason for each permission**__");
             e.fields(vec![
-                     ("Attach Files", "For some of the booru commands.\nFor an automatic text file to be sent when a message is too long.", true),
                      ("Read Messages", "So the bot can read the messages to know when a command was invoked and such.", true),
-                     ("Manage Messages", "Be able to clear reactions of timed out paginations.\nClear moderation command.", true),
+                     ("Manage Messages", "Be able to manage messages, like for clear command.", true),
                      ("Manage Channels", "Be able to mute members on the channel without having to create a role for it.", true),
                      ("Manage Webhooks", "For all the commands that can be ran on a schedule, so it's more efficient.", true),
-                     ("Manage Roles", "Be able to give a stream notification role.\nMute moderation command.", true),
+                     ("Manage Roles", "Be able to manage roles of server and members.", true),
                      ("Read Message History", "This is a required permission for every paginated command.", true),
                      ("Use External Emojis", "For all the commands that use emojis for better emphasis.", true),
-                     ("View Audit Log", "To be able to have a more feature rich logging to a channel.", true),
                      ("Add Reactions", "To be able to add reactions for all the paginated commands.", true),
-                     ("Mention Everyone", "To be able to mention the livestream notification role.", true),
                      ("Send Messages", "So the bot can send the messages it needs to send.", true),
                      ("Speak", "To be able to play music on that voice channel.", true),
                      ("Embed Links", "For the tags to be able to embed images.", true),
@@ -216,8 +210,8 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
         m.content("");
         m.embed(|e| {
             e.title(format!("**{}** - v{}", bot_name, version));
-            e.url("https://gitlab.com/nitsuga5124/robo-arc");
-            e.description("General Purpose Discord Bot made in [Rust](https://www.rust-lang.org/) using [serenity.rs](https://github.com/serenity-rs/serenity)\n\nHaving any issues? join the [Support Server](https://discord.gg/kH7z85n)\nBe sure to `invite` me to your server if you like what i can do!");
+            e.url("https://github.com/saanuregh/bowot-rs");
+            e.description("General Purpose Discord Bot made in [Rust](https://www.rust-lang.org/) using [serenity.rs](https://github.com/serenity-rs/serenity)\nHaving any issues, just dm me 😊.");
             e.field("Statistics:", format!("Shards: {}\nGuilds: {}\nChannels: {}\nPrivate Channels: {}", num_shards, num_guilds, num_channels, num_priv_channels), true);
             e.field("Lines of code:", format!("Blank: {}\nComment: {}\nCode: {}\nTotal Lines: {}", c_blank, c_comment, c_code, c_lines), true);
             e.field("Currently hosted by:", format!("Tag: {}\nID: {}", hoster_tag, hoster_id), true);
@@ -227,7 +221,6 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
                                             &reasonable_mem.parse::<u32>().expect("NaN").to_formatted_string(&Locale::en)
                                             ), true);
             e.field("Somewhat Static Stats:", format!("Command Count:\n`{}`\nUptime:\n`{}`", command_count, uptime), true);
-
             if let Some(x) = bot_icon {
                 e.thumbnail(x);
             }
