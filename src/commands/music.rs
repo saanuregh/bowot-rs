@@ -290,7 +290,7 @@ async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
             .get_mut(&(guild_id.0 as u64))
             .expect("No player for this guild available");
         if player.clone().is_empty() {
-            if let Err(why) = msg.channel_id.say(ctx.clone(), "Stopping playback").await {
+            if let Err(why) = msg.channel_id.say(ctx.clone(), "Queue finished").await {
                 error!("Player Worker: {:?}", why)
             }
             break;
