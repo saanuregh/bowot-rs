@@ -197,9 +197,12 @@ async fn clear(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
             channel.delete_messages(ctx, messages_ids).await?;
 
-            msg.channel_id
-                .say(ctx, format!("Successfully deleted `{}` message", n))
+            let success_msg = msg
+                .channel_id
+                .say(ctx, format!("Successfully deleted `{}` message, This message will self-delete in 5 seconds", n))
                 .await?;
+            tokio::time::delay_for(std::time::Duration::from_secs(5)).await;
+            success_msg.delete(ctx).await?;
         }
     }
     Ok(())
