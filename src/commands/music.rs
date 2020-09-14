@@ -5,6 +5,7 @@ use crate::{
 use regex::Regex;
 use serde_json;
 use serenity::{
+    builder::CreateMessage,
     framework::standard::{macros::command, Args, CommandResult},
     model::{channel::Message, misc::Mentionable},
     prelude::Context,
@@ -253,6 +254,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                             title: s.title,
                             requester: msg.author.id,
                             live: s.is_live.unwrap_or(false),
+                            thumbnail: s.thumbnail,
                         };
                         player.add_track(track);
                     }
@@ -273,6 +275,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                     title: s.title.clone(),
                     requester: msg.author.id,
                     live: s.is_live.unwrap_or(false),
+                    thumbnail: s.thumbnail,
                 };
                 player.add_track(track);
                 msg.channel_id
@@ -317,20 +320,14 @@ async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
             if let Err(why) = msg
                 .channel_id
                 .send_message(ctx.clone(), |m| {
-                    m.content("Now playing:");
-                    m.embed(|e| {
-                        e.title(&now_playing.title);
-                        e.url(&now_playing.url);
-                        e.field("Requester", now_playing.requester.mention(), true);
-                        e.field("Live", now_playing.live, true);
-                        e
-                    })
+                    _now_playing_embed(m, now_playing.clone());
+                    m
                 })
                 .await
             {
                 error!("Player Worker: {:?}", why)
             }
-            let source = match voice::ytdl(now_playing.url.as_str()).await {
+            let source = match voice::ytdl(&now_playing.url).await {
                 Ok(source) => source,
                 Err(_) => {
                     continue;
@@ -537,14 +534,8 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
             let now_playing = player.clone().queue.first().cloned().unwrap();
             msg.channel_id
                 .send_message(ctx.clone(), |m| {
-                    m.content("Now playing:");
-                    m.embed(|e| {
-                        e.title(&now_playing.title);
-                        e.url(&now_playing.url);
-                        e.field("Requester", now_playing.requester.mention(), true);
-                        e.field("Live", now_playing.live, true);
-                        e
-                    })
+                    _now_playing_embed(m, now_playing);
+                    m
                 })
                 .await?;
         } else {
@@ -629,4 +620,22 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     Ok(())
+}
+
+pub fn _now_playing_embed(m: &mut CreateMessage, np: Track) {
+    m.embed(|e| {
+        e.title("Now playing");
+        e.field("Title", &np.title, false);
+        e.field("URL", &np.url, false);
+        let live = match np.live {
+            true => "Yes",
+            false => "No",
+        };
+        e.field("Live", live, true);
+        e.field("Requester", np.requester.mention(), true);
+        if np.thumbnail.is_some() {
+            e.thumbnail(np.thumbnail.clone().unwrap());
+        }
+        e
+    });
 }

@@ -11,6 +11,7 @@ pub struct Track {
     pub title: String,
     pub requester: UserId,
     pub live: bool,
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Clone)]
