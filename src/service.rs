@@ -7,7 +7,7 @@ use serenity::{
 };
 use std::collections::HashSet;
 use std::{sync::Arc, time::Duration};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use Vec;
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
@@ -28,7 +28,13 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
                     if let Some(x) = _g.presences.get(&UserId(user_id)) {
                         if x.status.name() == OnlineStatus::Online.name() {
                             if let Ok(_u) = client.get_user(user_id).await {
-                                let _ = _u.dm(&ctx.http, |m| m.content("Drink some water")).await;
+                                if let Err(error) =
+                                    _u.dm(&ctx.http, |m| m.content("Drink some water")).await
+                                {
+                                    error!("Unhandled dispatch error: {:?}", error);
+                                } else {
+                                    info!("Successfully send to user: {:?}", user_id);
+                                }
                             }
                         }
                         break;
@@ -37,7 +43,7 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
             }
         }
     }
-    debug!("Hydrate reminder done.");
+    debug!("Hydrate reminder done");
 }
 
 async fn status_update(ctx: Arc<Context>) {
@@ -46,7 +52,7 @@ async fn status_update(ctx: Arc<Context>) {
     let random_status = statuses.choose(&mut rand::thread_rng()).unwrap();
     ctx.set_presence(Some(Activity::playing(random_status)), OnlineStatus::Online)
         .await;
-    debug!("Status update done.");
+    debug!("Status update done");
 }
 
 async fn check_vc_empty(ctx: Arc<Context>) {
@@ -75,12 +81,13 @@ async fn check_vc_empty(ctx: Arc<Context>) {
                             pm.remove(&(guild_id.0 as u64));
                         }
                         manager.remove(guild_id);
-                        debug!("Removed vc cause of inactivity to guild: {:?}", guild_id);
+                        info!("Removed VC cause of inactivity in guild: {:?}", guild_id);
                     }
                 }
             }
         }
     }
+    debug!("VC empty check done");
 }
 
 pub async fn service_loop(ctx: Arc<Context>) {
@@ -96,7 +103,7 @@ pub async fn service_loop(ctx: Arc<Context>) {
     tokio::spawn(async move {
         loop {
             tokio::join!(status_update(Arc::clone(&ctx_clone2)));
-            tokio::time::delay_for(Duration::from_secs(5)).await;
+            tokio::time::delay_for(Duration::from_secs(1800)).await;
         }
     });
     tokio::spawn(async move {

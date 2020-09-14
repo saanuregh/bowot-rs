@@ -1,11 +1,12 @@
 use futures::stream::StreamExt;
+use itconfig::*;
 use serde::{Deserialize, Serialize};
 use wither::bson::{doc, oid::ObjectId};
 use wither::mongodb::Client as Mongo;
 use wither::prelude::Model;
 
 pub async fn get_all_guilds(client: &Mongo) -> Result<Vec<Guild>, &str> {
-    let db = client.database("bowot");
+    let db = client.database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
     if let Ok(mut cursor) = Guild::find(&db, None, None).await {
         let mut guilds: Vec<Guild> = Vec::new();
         while let Some(res) = cursor.next().await {
@@ -55,7 +56,7 @@ impl Guild {
     }
 
     pub async fn from_db(client: &Mongo, guild_id: i64) -> Result<Self, &'static str> {
-        let db = client.database("bowot");
+        let db = client.database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
         if let Ok(_g) = Guild::find_one(&db, doc! {"guild_id": guild_id}, None).await {
             if let Some(g) = _g {
                 return Ok(g);
@@ -65,7 +66,7 @@ impl Guild {
     }
 
     pub async fn save_guild(&mut self, client: &Mongo) -> Result<&mut Self, &str> {
-        let db = client.database("bowot");
+        let db = client.database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
         if let Ok(_) = self.save(&db, None).await {
             return Ok(self);
         };
@@ -73,7 +74,7 @@ impl Guild {
     }
 
     pub async fn delete_guild(&mut self, client: &Mongo) -> Result<(), &str> {
-        let db = client.database("bowot");
+        let db = client.database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
         if let Ok(_) = self.delete(&db).await {
             return Ok(());
         };
