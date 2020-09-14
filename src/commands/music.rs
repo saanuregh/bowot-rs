@@ -15,6 +15,9 @@ use tracing::error;
 use youtube_dl::YoutubeDl;
 
 const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
+const QUEUE_EMPTY_MSG: &str = "The queue is empty";
+const NOTIN_VC_MSG: &str = "Not in a voice channel";
+const NOTHING_PLAYING: &str = "Nothing playing";
 
 pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
     let guild = msg.guild(&ctx.cache).await.unwrap();
@@ -35,15 +38,14 @@ pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
+    let pm_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected PlayerManager in TypeMap");
     let mut manager = manager_lock.lock().await;
     if manager.join(guild_id, connect_to).is_some() {
-        let pm_lock = data
-            .get::<PlayerManager>()
-            .cloned()
-            .expect("Expected PlayerManager in TypeMap");
         let mut pm = pm_lock.write().await;
         pm.insert(guild_id.0 as u64, Player::new(guild_id));
-
         Some(connect_to.mention())
     } else {
         None
@@ -54,13 +56,10 @@ pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
 #[command]
 #[aliases("connect")]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    match _join(ctx, msg).await {
-        Some(_) => {
-            msg.react(ctx, '✅').await?;
-        }
-        None => {
-            msg.channel_id.say(ctx, "Not in a voice channel").await?;
-        }
+    if _join(ctx, msg).await.is_some() {
+        msg.react(ctx, '✅').await?;
+    } else {
+        msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
     }
 
     Ok(())
@@ -125,7 +124,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             queue_str = queue_str.replace("@", "@\u{200B}");
             msg.channel_id.say(ctx, &queue_str).await?;
         } else {
-            msg.channel_id.say(ctx, "The queue is empty").await?;
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
@@ -149,7 +148,7 @@ async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
             player.clear_except_np();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, "The queue is empty").await?;
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
@@ -173,7 +172,7 @@ async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
             player.shuffle();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, "The queue is empty").await?;
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
@@ -215,10 +214,8 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     }
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
+    let data = ctx.data.read().await;
+    let manager_lock = data
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in ShareMap.");
@@ -226,9 +223,12 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let has_joined = manager.get(guild_id).is_some();
     if !has_joined {
         drop(manager);
-        _join(ctx, msg).await;
+        if _join(ctx, msg).await.is_none() {
+            msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
+            return Ok(());
+        }
     }
-    let data = ctx.data.read().await;
+
     let player_lock = data
         .get::<PlayerManager>()
         .cloned()
@@ -385,36 +385,30 @@ async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
 #[aliases(next)]
 async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
+    let data = ctx.data.read().await;
+    let manager_lock = data
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
     let mut manager = manager_lock.lock().await;
-    match manager.get_mut(guild_id) {
-        Some(handler) => {
-            let data = ctx.data.read().await;
-            let player_lock = data
-                .get::<PlayerManager>()
-                .cloned()
-                .expect("Expected PlayerManger in TypeMap");
-            let mut pm = player_lock.write().await;
-            let player = pm
-                .get_mut(&(guild_id.0 as u64))
-                .expect("No player for this guild available");
-            if !player.is_finished().await {
-                player.reset();
-                handler.stop();
-                msg.react(ctx, '✅').await?;
-            } else {
-                msg.channel_id.say(ctx, "Nothing playing").await?;
-            }
+    if let Some(handler) = manager.get_mut(guild_id) {
+        let player_lock = data
+            .get::<PlayerManager>()
+            .cloned()
+            .expect("Expected PlayerManger in TypeMap");
+        let mut pm = player_lock.write().await;
+        let player = pm
+            .get_mut(&(guild_id.0 as u64))
+            .expect("No player for this guild available");
+        if !player.is_finished().await {
+            player.reset();
+            handler.stop();
+            msg.react(ctx, '✅').await?;
+        } else {
+            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
         }
-        None => {
-            msg.channel_id.say(ctx, JOIN_MSG).await?;
-        }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -424,39 +418,33 @@ async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
+    let data = ctx.data.read().await;
+    let manager_lock = data
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
-    let mut manager = manager_lock.lock().await;
-    match manager.get_mut(guild_id) {
-        Some(_) => {
-            let data = ctx.data.read().await;
-            let player_lock = data
-                .get::<PlayerManager>()
-                .cloned()
-                .expect("Expected Player    Manger in TypeMap");
-            let mut pm = player_lock.write().await;
-            let player = pm
-                .get_mut(&(guild_id.0 as u64))
-                .expect("No player for this guild available");
-            if !player.is_finished().await {
-                if player.is_paused().await {
-                    msg.channel_id.say(ctx, "Already paused").await?;
-                } else {
-                    player.pause().await;
-                    msg.react(ctx, '✅').await?;
-                }
-            } else {
-                msg.channel_id.say(ctx, "Nothing playing").await?;
-            }
+    let manager = manager_lock.lock().await;
+    if manager.get(guild_id).is_none() {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        return Ok(());
+    }
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected Player    Manger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.is_finished().await {
+        if player.is_paused().await {
+            msg.channel_id.say(ctx, "Already paused").await?;
+        } else {
+            player.pause().await;
+            msg.react(ctx, '✅').await?;
         }
-        None => {
-            msg.channel_id.say(ctx, JOIN_MSG).await?;
-        }
+    } else {
+        msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
     }
 
     Ok(())
@@ -467,39 +455,33 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
 #[aliases(unpause)]
 async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
+    let data = ctx.data.read().await;
+    let manager_lock = data
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
-    let mut manager = manager_lock.lock().await;
-    match manager.get_mut(guild_id) {
-        Some(_) => {
-            let data = ctx.data.read().await;
-            let player_lock = data
-                .get::<PlayerManager>()
-                .cloned()
-                .expect("Expected Player    Manger in TypeMap");
-            let mut pm = player_lock.write().await;
-            let player = pm
-                .get_mut(&(guild_id.0 as u64))
-                .expect("No player for this guild available");
-            if !player.is_finished().await {
-                if !player.is_paused().await {
-                    msg.channel_id.say(ctx, "Already playing").await?;
-                } else {
-                    player.play().await;
-                    msg.react(ctx, '✅').await?;
-                }
-            } else {
-                msg.channel_id.say(ctx, "Nothing playing").await?;
-            }
+    let manager = manager_lock.lock().await;
+    if manager.get(guild_id).is_none() {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        return Ok(());
+    }
+    let player_lock = data
+        .get::<PlayerManager>()
+        .cloned()
+        .expect("Expected Player    Manger in TypeMap");
+    let mut pm = player_lock.write().await;
+    let player = pm
+        .get_mut(&(guild_id.0 as u64))
+        .expect("No player for this guild available");
+    if !player.is_finished().await {
+        if !player.is_paused().await {
+            msg.channel_id.say(ctx, "Already playing").await?;
+        } else {
+            player.play().await;
+            msg.react(ctx, '✅').await?;
         }
-        None => {
-            msg.channel_id.say(ctx, JOIN_MSG).await?;
-        }
+    } else {
+        msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
     }
 
     Ok(())
@@ -509,37 +491,31 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let manager_lock = ctx
-        .data
-        .read()
-        .await
+    let data = ctx.data.read().await;
+    let manager_lock = data
         .get::<VoiceManager>()
         .cloned()
         .expect("Expected VoiceManager in TypeMap.");
     let mut manager = manager_lock.lock().await;
-    match manager.get_mut(guild_id) {
-        Some(handler) => {
-            let data = ctx.data.read().await;
-            let player_lock = data
-                .get::<PlayerManager>()
-                .cloned()
-                .expect("Expected PlayerManger in TypeMap");
-            let mut pm = player_lock.write().await;
-            let player = pm
-                .get_mut(&(guild_id.0 as u64))
-                .expect("No player for this guild available");
-            if !player.is_finished().await {
-                player.clear();
-                player.reset();
-                handler.stop();
-                msg.react(ctx, '✅').await?;
-            } else {
-                msg.channel_id.say(ctx, "Nothing playing").await?;
-            }
+    if let Some(handler) = manager.get_mut(guild_id) {
+        let player_lock = data
+            .get::<PlayerManager>()
+            .cloned()
+            .expect("Expected PlayerManger in TypeMap");
+        let mut pm = player_lock.write().await;
+        let player = pm
+            .get_mut(&(guild_id.0 as u64))
+            .expect("No player for this guild available");
+        if !player.is_finished().await {
+            player.clear();
+            player.reset();
+            handler.stop();
+            msg.react(ctx, '✅').await?;
+        } else {
+            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
         }
-        None => {
-            msg.channel_id.say(ctx, JOIN_MSG).await?;
-        }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -572,7 +548,7 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
                 })
                 .await?;
         } else {
-            msg.channel_id.say(ctx, "Nothing playing").await?;
+            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
@@ -638,18 +614,15 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut pm = player_lock.write().await;
     if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
         if !player.clone().is_empty() {
-            match player.remove_track(index) {
-                Some(t) => {
-                    msg.channel_id
-                        .say(ctx, format!("Removed - {}", t.title))
-                        .await?;
-                }
-                None => {
-                    msg.channel_id.say(ctx, "Out of bounds").await?;
-                }
+            if let Some(t) = player.remove_track(index) {
+                msg.channel_id
+                    .say(ctx, format!("Removed - {}", t.title))
+                    .await?;
+            } else {
+                msg.channel_id.say(ctx, "Out of bounds").await?;
             }
         } else {
-            msg.channel_id.say(ctx, "The queue is empty").await?;
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
