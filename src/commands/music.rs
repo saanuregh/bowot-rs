@@ -122,7 +122,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             };
             queue_str += &format!(
                 "__**Now playing:**__\n```yaml\n{} | {}\n```",
-                shorten(&queue[0].title, 100),
+                shorten(&queue[0].title, 40),
                 duration
             );
             if queue.len() > 1 {
@@ -136,7 +136,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
                     queue_str += &format!(
                         "{}: {} | {}\n",
                         index + 1,
-                        shorten(&track.title, 100),
+                        shorten(&track.title, 40),
                         duration
                     );
                 }
