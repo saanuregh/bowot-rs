@@ -268,7 +268,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let player = pm
         .get_mut(&(guild_id.0 as u64))
         .expect("No player for this guild available");
-    if let Ok(result) = YoutubeDl::new(query).run() {
+    if let Ok(result) = YoutubeDl::new(query).run().await {
         match result {
             youtube_dl::YoutubeDlOutput::Playlist(p) => {
                 if let Some(playlist) = p.entries {
