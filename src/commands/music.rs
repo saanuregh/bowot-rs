@@ -132,11 +132,9 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
                     );
                 }
                 if queue.len() > 10 {
-
                     queue_str += &format!("... {}", queue.len());
                 }
                 queue_str += "\n```";
-
             }
             queue_str = queue_str.replace("@", "@\u{200B}");
             msg.channel_id
@@ -296,8 +294,8 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                                 ctx,
                                 format!(
                                     "__**Queued:**__  `{}` | `{}`",
-                                    player.queue[0].title,
-                                    _duration_format(&player.queue[0])
+                                    player.queue.last().unwrap().title,
+                                    _duration_format(&player.queue.last().unwrap())
                                 ),
                             )
                             .await?;
@@ -475,7 +473,7 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
     let player_lock = data
         .get::<PlayerManager>()
         .cloned()
-        .expect("Expected Player    Manger in TypeMap");
+        .expect("Expected PlayerManger in TypeMap");
     let mut pm = player_lock.write().await;
     let player = pm
         .get_mut(&(guild_id.0 as u64))
