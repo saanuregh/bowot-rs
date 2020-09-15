@@ -14,12 +14,13 @@ use serenity::{
 };
 use std::{sync::Arc, time::Duration};
 use tracing::error;
-use youtube_dl::YoutubeDl;
+use youtube_dl::{YoutubeDl, YoutubeDlOutput};
 
 const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
 const QUEUE_EMPTY_MSG: &str = "The queue is empty";
 const NOTIN_VC_MSG: &str = "Not in a voice channel";
 const NOTHING_PLAYING: &str = "Nothing playing";
+const MAX_PLAYLIST: usize = 25;
 
 pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
     let guild = msg.guild(&ctx.cache).await.unwrap();
@@ -115,35 +116,27 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         let queue = player.clone().queue;
         if !queue.is_empty() {
             let mut queue_str = String::new();
-            let duration = if queue[0].live {
-                "Live".to_string()
-            } else {
-                humantime::format_duration(Duration::from_secs(queue[0].duration)).to_string()
-            };
             queue_str += &format!(
                 "__**Now playing:**__\n```yaml\n{} | {}\n```",
                 shorten(&queue[0].title, 40),
-                duration
+                _duration_format(&queue[0])
             );
             if queue.len() > 1 {
                 queue_str += "\n__**Queue:**__\n```yaml\n";
                 for (index, track) in queue[1..].iter().take(10).enumerate() {
-                    let duration = if track.live {
-                        "Live".to_string()
-                    } else {
-                        humantime::format_duration(Duration::from_secs(track.duration)).to_string()
-                    };
                     queue_str += &format!(
                         "{}: {} | {}\n",
                         index + 1,
                         shorten(&track.title, 40),
-                        duration
+                        _duration_format(&queue[0])
                     );
                 }
                 if queue.len() > 10 {
+
                     queue_str += &format!("... {}", queue.len());
                 }
                 queue_str += "\n```";
+
             }
             queue_str = queue_str.replace("@", "@\u{200B}");
             msg.channel_id
@@ -270,7 +263,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .expect("No player for this guild available");
     if let Ok(result) = YoutubeDl::new(query).run().await {
         match result {
-            youtube_dl::YoutubeDlOutput::Playlist(p) => {
+            YoutubeDlOutput::Playlist(p) => {
                 if let Some(playlist) = p.entries {
                     if playlist.is_empty() {
                         msg.channel_id
@@ -278,7 +271,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                             .await?;
                         return Ok(());
                     }
-                    for s in playlist.clone().into_iter() {
+                    for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
                         let track = Track {
                             url: format!("https://www.youtube.com/watch?v={}", s.id),
                             title: s.title,
@@ -295,16 +288,23 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                     }
                     if playlist.len() > 1 {
                         msg.channel_id
-                            .say(ctx, format!("Queued {} tracks", playlist.len()))
+                            .say(ctx, format!("__**Queued:**__  `{}` tracks", playlist.len()))
                             .await?;
                     } else {
                         msg.channel_id
-                            .say(ctx, format!("Queued - {}", playlist.first().unwrap().title))
+                            .say(
+                                ctx,
+                                format!(
+                                    "__**Queued:**__  `{}` | `{}`",
+                                    player.queue[0].title,
+                                    _duration_format(&player.queue[0])
+                                ),
+                            )
                             .await?;
                     }
                 }
             }
-            youtube_dl::YoutubeDlOutput::SingleVideo(s) => {
+            YoutubeDlOutput::SingleVideo(s) => {
                 let track = Track {
                     url: s.webpage_url.unwrap(),
                     title: s.title.clone(),
@@ -317,9 +317,16 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                         .as_f64()
                         .unwrap() as u64,
                 };
-                player.add_track(track);
+                player.add_track(track.clone());
                 msg.channel_id
-                    .say(ctx, format!("Queued - {}", s.title))
+                    .say(
+                        ctx,
+                        format!(
+                            "__**Queued:**__  `{}` | `{}`",
+                            track.title,
+                            _duration_format(&track)
+                        ),
+                    )
                     .await?;
             }
         }
@@ -662,21 +669,24 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     Ok(())
 }
 
-pub fn _now_playing_embed(m: &mut CreateMessage, np: Track) {
+fn _now_playing_embed(m: &mut CreateMessage, np: Track) {
     m.embed(|e| {
         e.title("Now playing");
         e.field("Title", &np.title, false);
         e.field("URL", &np.url, false);
-        let duration = if np.live {
-            "Live".to_string()
-        } else {
-            humantime::format_duration(Duration::from_secs(np.duration)).to_string()
-        };
-        e.field("Duration", duration, true);
+        e.field("Duration", _duration_format(&np), true);
         e.field("Requester", np.requester.mention(), true);
         if np.thumbnail.is_some() {
             e.thumbnail(np.thumbnail.clone().unwrap());
         }
         e
     });
+}
+
+fn _duration_format(np: &Track) -> String {
+    if np.live {
+        "Live".to_string()
+    } else {
+        humantime::format_duration(Duration::from_secs(np.duration)).to_string()
+    }
 }

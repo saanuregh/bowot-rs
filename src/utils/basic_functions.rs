@@ -7,13 +7,11 @@ pub fn capitalize_first(input: &str) -> String {
     }
 }
 
-pub fn shorten(input: &str, len: usize) -> String {
-    let mut s = input.to_string();
-    if input.len() > len {
-        s.truncate(len);
-        s.push_str("...");
+pub fn shorten(s: &str, max_chars: usize) -> String {
+    match s.char_indices().nth(max_chars) {
+        None => s.to_string(),
+        Some((idx, _)) => s[..idx].to_string(),
     }
-    s
 }
 
 pub fn string_to_seconds(text: impl ToString) -> u64 {
