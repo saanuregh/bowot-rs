@@ -12,6 +12,7 @@ pub struct Track {
     pub requester: UserId,
     pub live: bool,
     pub thumbnail: Option<String>,
+    pub duration: u64,
 }
 
 #[derive(Clone)]

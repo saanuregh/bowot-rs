@@ -7,6 +7,15 @@ pub fn capitalize_first(input: &str) -> String {
     }
 }
 
+pub fn shorten(input: &str, len: usize) -> String {
+    let mut s = input.to_string();
+    if input.len() > len {
+        s.truncate(len);
+        s.push_str("...");
+    }
+    s
+}
+
 pub fn string_to_seconds(text: impl ToString) -> u64 {
     let s = text.to_string();
     let words = s.split(' ');

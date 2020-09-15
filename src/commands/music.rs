@@ -1,5 +1,6 @@
 use crate::{
     player::{Player, Repeat, Track},
+    utils::basic_functions::shorten,
     PlayerManager, VoiceManager,
 };
 use regex::Regex;
@@ -113,17 +114,46 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
     if let Some(player) = pm.get(&(guild_id.0 as u64)) {
         let queue = player.clone().queue;
         if !queue.is_empty() {
-            let mut queue_str = String::from("```st\n");
-            queue_str += &format!("Now playing: {}\n", queue[0].title);
-            for (index, track) in queue[1..].iter().take(10).enumerate() {
-                queue_str += &format!("{}: {}\n", index + 1, track.title);
+            let mut queue_str = String::new();
+            let duration = if queue[0].live {
+                "Live".to_string()
+            } else {
+                humantime::format_duration(Duration::from_secs(queue[0].duration)).to_string()
+            };
+            queue_str += &format!(
+                "__**Now playing:**__\n```yaml\n{} | {}\n```",
+                shorten(&queue[0].title, 100),
+                duration
+            );
+            if queue.len() > 1 {
+                queue_str += "\n__**Queue:**__\n```yaml\n";
+                for (index, track) in queue[1..].iter().take(10).enumerate() {
+                    let duration = if track.live {
+                        "Live".to_string()
+                    } else {
+                        humantime::format_duration(Duration::from_secs(track.duration)).to_string()
+                    };
+                    queue_str += &format!(
+                        "{}: {} | {}\n",
+                        index + 1,
+                        shorten(&track.title, 100),
+                        duration
+                    );
+                }
+                if queue.len() > 10 {
+                    queue_str += &format!("... {}", queue.len());
+                }
+                queue_str += "\n```";
             }
-            if queue.len() > 10 {
-                queue_str += &format!("... {}", queue.len());
-            }
-            queue_str += "\n```";
             queue_str = queue_str.replace("@", "@\u{200B}");
-            msg.channel_id.say(ctx, &queue_str).await?;
+            msg.channel_id
+                .send_message(ctx.clone(), |m| {
+                    m.embed(|e| {
+                        e.description(&queue_str);
+                        e
+                    })
+                })
+                .await?;
         } else {
             msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
         }
@@ -255,6 +285,11 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                             requester: msg.author.id,
                             live: s.is_live.unwrap_or(false),
                             thumbnail: s.thumbnail,
+                            duration: s
+                                .duration
+                                .unwrap_or(serde_json::to_value(0).unwrap())
+                                .as_f64()
+                                .unwrap() as u64,
                         };
                         player.add_track(track);
                     }
@@ -276,6 +311,11 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                     requester: msg.author.id,
                     live: s.is_live.unwrap_or(false),
                     thumbnail: s.thumbnail,
+                    duration: s
+                        .duration
+                        .unwrap_or(serde_json::to_value(0).unwrap())
+                        .as_f64()
+                        .unwrap() as u64,
                 };
                 player.add_track(track);
                 msg.channel_id
@@ -627,11 +667,12 @@ pub fn _now_playing_embed(m: &mut CreateMessage, np: Track) {
         e.title("Now playing");
         e.field("Title", &np.title, false);
         e.field("URL", &np.url, false);
-        let live = match np.live {
-            true => "Yes",
-            false => "No",
+        let duration = if np.live {
+            "Live".to_string()
+        } else {
+            humantime::format_duration(Duration::from_secs(np.duration)).to_string()
         };
-        e.field("Live", live, true);
+        e.field("Duration", duration, true);
         e.field("Requester", np.requester.mention(), true);
         if np.thumbnail.is_some() {
             e.thumbnail(np.thumbnail.clone().unwrap());
