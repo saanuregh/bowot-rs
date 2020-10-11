@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use regex;
 use reqwest::Client;
@@ -7,6 +8,12 @@ use serenity::{
     model::channel::Message,
     prelude::Context,
 };
+
+lazy_static! {
+    static ref SUBREDDIT_MEMES: Vec<&'static str> = include_str!("data/subreddit_memes.txt")
+        .split('\n')
+        .collect();
+}
 
 // Structs used to deserialize the output of the reddit api.
 #[derive(Deserialize, Clone)]
@@ -114,14 +121,7 @@ async fn reddit_command(
 #[aliases(dank)]
 #[bucket(reddit)]
 async fn meme(ctx: &Context, msg: &Message) -> CommandResult {
-    let subreddits = vec![
-        "dankmemes",
-        "memes",
-        "ComedyCemetery",
-        "MemeEconomy",
-        "comedyheaven",
-    ];
-    return reddit_command(ctx, msg, subreddits, true).await;
+    return reddit_command(ctx, msg, SUBREDDIT_MEMES.to_vec(), true).await;
 }
 
 /// Gets random image post from the subreddit given as argument.
