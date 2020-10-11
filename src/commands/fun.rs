@@ -11,12 +11,12 @@ use serde::Deserialize;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     futures::stream::StreamExt,
-    model::channel::Message,
-    model::id::UserId,
+    http::AttachmentType,
+    model::{channel::Message, id::UserId, misc::Mentionable},
     prelude::Context,
+    utils::Colour,
 };
 use std::{collections::HashMap, time::Duration};
-
 // Structs used to deserialize the output of the urban dictionary api call.
 #[derive(Deserialize, Clone)]
 struct UrbanDict {
@@ -982,5 +982,140 @@ async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
                 .await?;
         }
     }
+    Ok(())
+}
+
+/// Ship two person
+///
+/// Usage:
+/// `ship <@user1> <@user2>`
+#[command]
+async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
+    let verdicts = vec![
+        "Not a slightest chance. You should give up.",
+        "You are more likely to get hit by a lightning than you two ever coming together",
+        "If there\"s a chance.. Why not?",
+        "You should be married now!",
+        "Both of you are definitely soulmates",
+        "Fate has decided",
+    ];
+    let title = vec![
+        "God has given up on you ",
+        "In other words, still no chance ",
+        "You make an average pair!",
+        "Onwards! To the church! ",
+        "I knew it! You make a unique pair!",
+        "PERFECT MATCH. The love powerlevel is over 9000 ",
+    ];
+    let emoji = vec![
+        "\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤",
+        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️",
+    ];
+    if msg.mentions.len() != 2 {
+        msg.reply(ctx, "You must mention 2 different person to ship")
+            .await?;
+        return Ok(());
+    }
+    let percentage = (msg.mentions[0].id.0 + msg.mentions[1].id.0) % 101;
+    let color = Colour::from_rgb(
+        {
+            if percentage > 50 {
+                (255 - ((percentage - 50) * 2 * 255) / 100) as u8
+            } else {
+                255
+            }
+        },
+        {
+            if percentage < 50 {
+                ((percentage * 2 * 255) / 100) as u8
+            } else {
+                255
+            }
+        },
+        0,
+    );
+    msg.channel_id
+        .send_message(ctx, |m| {
+            m.embed(|e| {
+                e.title(title[(percentage / (100 / (title.len() - 1)) as u64) as usize]);
+                e.description(format!(
+                    "{}\n\n{}\n\n{} and {} compatibility reading is at **{}**%",
+                    emoji[(percentage / 10) as usize],
+                    verdicts[(percentage / (100 / (verdicts.len() - 1)) as u64) as usize],
+                    msg.mentions[0].mention(),
+                    msg.mentions[1].mention(),
+                    percentage
+                ));
+                e.color(color)
+            })
+        })
+        .await?;
+    Ok(())
+}
+
+/// Rate PP
+///
+/// Usage:
+/// `pp <@user>`
+#[command]
+async fn pp(ctx: &Context, msg: &Message) -> CommandResult {
+    let verdict = vec![
+        "What am i supposed to be looking here?",
+        "Micro PP!",
+        "Average PP!",
+        "Big PP!",
+        "Humongous PP!",
+        "ITS OVER 9000!",
+    ];
+    let user = msg.mentions.get(0).unwrap_or(&msg.author);
+    let length = user.id.0 % 101;
+    msg.channel_id
+        .send_message(ctx, |m| {
+            m.embed(|e| {
+                e.title("Dr bowot's PP report");
+                e.description(format!(
+                    "Patient: {}\nScan: 8{}D\nVerdict: {}\n\nSigned by,\n_Dr bowot_",
+                    user.mention(),
+                    "=".repeat((length / 10) as usize),
+                    verdict[(length / (100 / (verdict.len() - 1)) as u64) as usize],
+                ))
+            })
+        })
+        .await?;
+    Ok(())
+}
+
+/// F
+///
+/// Usage:
+/// `respect soldier`
+#[command]
+#[min_args(1)]
+async fn respect(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let message = args.message();
+    msg.channel_id
+        .send_message(ctx, |m| {
+            m.embed(|e| {
+                e.description(format!(
+                    "{} has paid their respect to {}.",
+                    msg.author.mention(),
+                    message
+                ));
+                e.footer(|f| f.text("Press F to pay respect."))
+            })
+        })
+        .await?
+        .react(&ctx, '🇫')
+        .await?;
+    msg.delete(&ctx).await?;
     Ok(())
 }

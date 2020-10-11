@@ -53,7 +53,10 @@ struct Meta;
     eightball,
     custom_commands,
     self_roles,
-    valorant
+    valorant,
+    ship,
+    pp,
+    respect
 )]
 struct Fun;
 
