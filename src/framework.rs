@@ -169,9 +169,9 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
             };
             let _ = msg.channel_id.say(ctx, s).await;
         }
-        DispatchError::IgnoredBot {} => {
-            return;
-        }
+        // DispatchError::IgnoredBot {} => {
+        //     return;
+        // }
         DispatchError::CheckFailed(_, reason) => {
             if let Reason::User(r) = reason {
                 let _ = msg.channel_id.say(ctx, r).await;
