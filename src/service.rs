@@ -1,5 +1,5 @@
 use crate::{get_all_guilds, MongoClient, PlayerManager, VoiceManager};
-use itconfig::*;
+use lazy_static::lazy_static;
 use rand::seq::SliceRandom;
 use serenity::{
     model::{gateway::Activity, id::UserId, user::OnlineStatus},
@@ -8,7 +8,12 @@ use serenity::{
 use std::collections::HashSet;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info};
-use Vec;
+
+lazy_static! {
+    static ref STATUSES: Vec<&'static str> =
+        include_str!("data/statuses.txt").split('\n').collect();
+    static ref HYDRATE: Vec<&'static str> = include_str!("data/hydrate.txt").split('\n').collect();
+}
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
@@ -28,8 +33,9 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
                     if let Some(x) = _g.presences.get(&UserId(user_id)) {
                         if x.status.name() == OnlineStatus::Online.name() {
                             if let Ok(_u) = client.get_user(user_id).await {
+                                let random_msg = HYDRATE.choose(&mut rand::thread_rng()).unwrap();
                                 if let Err(error) =
-                                    _u.dm(&ctx.http, |m| m.content("Drink some water")).await
+                                    _u.dm(&ctx.http, |m| m.content(random_msg)).await
                                 {
                                     error!("Unhandled dispatch error: {:?}", error);
                                 } else {
@@ -47,9 +53,7 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
 }
 
 async fn status_update(ctx: Arc<Context>) {
-    let status_str: String = get_env_or_default("STATUSES", "uwu,owo,raid shadow legends");
-    let statuses: Vec<&str> = status_str.split(",").collect();
-    let random_status = statuses.choose(&mut rand::thread_rng()).unwrap();
+    let random_status = STATUSES.choose(&mut rand::thread_rng()).unwrap();
     ctx.set_presence(Some(Activity::playing(random_status)), OnlineStatus::Online)
         .await;
     debug!("Status update done");
