@@ -32,7 +32,7 @@ pub struct Update {
     pub updated_at: String,
 }
 
-pub async fn get_status() -> Result<ValorantStatus, String> {
+pub async fn get_valorant_status() -> Result<ValorantStatus, String> {
     let client = Client::new();
     let url = "https://riotstatus.vercel.app/valorant";
     match client.get(url).send().await {
@@ -41,5 +41,43 @@ pub async fn get_status() -> Result<ValorantStatus, String> {
             Err(_) => Err("error decoding".to_string()),
         },
         Err(_) => Err("error getting response".to_string()),
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyrics {
+    pub title: String,
+    pub author: String,
+    pub lyrics: String,
+    pub thumbnail: Thumbnail,
+    pub links: Links,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Thumbnail {
+    pub genius: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Links {
+    pub genius: String,
+}
+
+pub async fn get_lyrics(title: String) -> Result<Lyrics, ()> {
+    let client = Client::new();
+    match client
+        .get("https://some-random-api.ml/lyrics")
+        .query(&[("title", title)])
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<Lyrics>().await {
+            Ok(data) => Ok(data),
+            Err(_) => Err(()),
+        },
+        Err(_) => Err(()),
     }
 }

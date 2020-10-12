@@ -1,5 +1,5 @@
 use crate::{
-    utils::{basic_functions::*, valorant::*},
+    utils::{apis::*, basic_functions::*},
     Guild, MongoClient,
 };
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     futures::stream::StreamExt,
-    http::AttachmentType,
     model::{channel::Message, id::UserId, misc::Mentionable},
     prelude::Context,
     utils::Colour,
@@ -954,7 +953,7 @@ async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             region = _r;
         }
     }
-    match get_status().await {
+    match get_valorant_status().await {
         Ok(status) => {
             let data = status.regions.iter().find(|&x| x.name == region).unwrap();
             if data.maintenances.is_empty() && data.incidents.is_empty() {

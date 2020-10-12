@@ -109,7 +109,8 @@ struct Hydrate;
     clear_queue,
     repeat,
     remove,
-    now_playing
+    now_playing,
+    lyrics
 )]
 struct Music;
 

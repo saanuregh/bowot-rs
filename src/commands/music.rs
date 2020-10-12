@@ -1,6 +1,6 @@
 use crate::{
     player::{Player, Repeat, Track},
-    utils::basic_functions::shorten,
+    utils::{apis::get_lyrics, basic_functions::shorten},
     PlayerManager, VoiceManager,
 };
 use regex::Regex;
@@ -12,6 +12,7 @@ use serenity::{
     prelude::Context,
     voice,
 };
+use serenity_utils::menu::{Menu, MenuOptions};
 use std::{sync::Arc, time::Duration};
 use tracing::error;
 use youtube_dl::{YoutubeDl, YoutubeDlOutput};
@@ -662,6 +663,79 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
+    }
+
+    Ok(())
+}
+
+/// Get lyrics of current song, or search for another.
+///
+/// Usage: `lyrics <title>`
+/// or `lyrics` for lyrics of now playing
+#[command]
+async fn lyrics(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let title: String = match args.remains() {
+        Some(m) => m.to_string(),
+        None => {
+            let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+            let data = ctx.data.read().await;
+            let player_lock = data
+                .get::<PlayerManager>()
+                .cloned()
+                .expect("Expected PlayerManger in TypeMap");
+            let mut pm = player_lock.write().await;
+            if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
+                if !player.is_finished().await {
+                    let now_playing = player.clone().queue.first().cloned().unwrap();
+                    now_playing.title;
+                }
+            }
+            msg.channel_id
+                .say(
+                    ctx,
+                    "Currently nothing is playing, please give a song title as argument",
+                )
+                .await?;
+            return Ok(());
+        }
+    };
+    match get_lyrics(title.clone()).await {
+        Ok(lyrics) => {
+            let chars: Vec<char> = lyrics.lyrics.chars().collect();
+            let chunks = chars
+                .chunks(2000)
+                .map(|chunk| chunk.iter().collect::<String>())
+                .collect::<Vec<_>>();
+            let pages = chunks
+                .iter()
+                .enumerate()
+                .map(|(i, chunk)| {
+                    let mut p = CreateMessage::default();
+                    p.embed(|e| {
+                        e.footer(|f| f.text(&format!("Page {}/{}", i + 1, chunks.len())));
+                        e.url(&lyrics.links.genius);
+                        e.thumbnail(&lyrics.thumbnail.genius);
+                        e.title(&format!("{} - {}", lyrics.author, lyrics.title));
+                        e.description(chunk);
+                        e
+                    });
+                    p
+                })
+                .collect::<Vec<_>>();
+            let mut menu_options = MenuOptions::default();
+            menu_options.timeout = 180.0;
+            let menu = Menu::new(ctx, msg, &pages, menu_options);
+            menu.run().await?;
+        }
+        Err(_) => {
+            msg.channel_id
+                .say(
+                    ctx,
+                    &format!("Could not find lyrics for the song: `{}`", title),
+                )
+                .await?;
+            return Ok(());
+        }
     }
 
     Ok(())
