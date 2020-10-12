@@ -1,10 +1,9 @@
-use reqwest::Client;
+use crate::utils::apis::*;
 use serenity::{
     framework::standard::{macros::command, CommandResult},
-    model::channel::Message,
+    model::{channel::Message, misc::Mentionable},
     prelude::Context,
 };
-use std::collections::HashMap;
 
 async fn _neko_command(ctx: &Context, msg: &Message, key: &str) -> CommandResult {
     if msg.mentions.len() != 1 {
@@ -26,27 +25,14 @@ async fn _neko_command(ctx: &Context, msg: &Message, key: &str) -> CommandResult
             return Ok(());
         }
     };
-    let user_1 = msg
-        .author
-        .nick_in(ctx, msg.guild_id.unwrap())
-        .await
-        .unwrap_or(msg.author.name.clone());
-    let user_2 = msg.mentions[0]
-        .nick_in(ctx, msg.guild_id.unwrap())
-        .await
-        .unwrap_or(msg.mentions[0].name.clone());
-    let client = Client::new();
-    let resp = client
-        .get(&format!("https://nekos.life/api/v2/img/{}", key))
-        .send()
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
+    let user_1 = msg.author.mention();
+    let user_2 = msg.mentions[0].mention();
+    let resp = neko_api(key, true).await?;
     if let Some(url) = resp.get("url") {
         msg.channel_id
             .send_message(ctx, |m| {
                 m.embed(|e| {
-                    e.title(
+                    e.description(
                         title_builder
                             .replacen("{}", &user_1, 1)
                             .replacen("{}", &user_2, 1),

@@ -6,8 +6,7 @@ use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Tabl
 use fasteval::error::Error;
 use qrcode::{render::unicode, QrCode};
 use rand::{thread_rng, Rng};
-use reqwest::{Client as ReqwestClient, Url};
-use serde::Deserialize;
+use reqwest::Url;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     futures::stream::StreamExt,
@@ -16,70 +15,6 @@ use serenity::{
     utils::Colour,
 };
 use std::{collections::HashMap, time::Duration};
-// Structs used to deserialize the output of the urban dictionary api call.
-#[derive(Deserialize, Clone)]
-struct UrbanDict {
-    definition: String,
-    permalink: String,
-    thumbs_up: u32,
-    thumbs_down: u32,
-    author: String,
-    written_on: String,
-    example: String,
-    word: String,
-}
-
-#[derive(Deserialize)]
-struct UrbanList {
-    list: Vec<UrbanDict>,
-}
-
-// Structs used to deserialize the output of the dictionary api call.
-#[derive(Debug, Deserialize)]
-struct DictionaryElement {
-    word: String,
-    phonetic: Option<String>,
-    origin: Option<String>,
-    meanings: Vec<Meaning>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Meaning {
-    #[serde(rename = "partOfSpeech")]
-    part_of_speech: Option<String>,
-    definitions: Vec<Definition>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Definition {
-    definition: String,
-    synonyms: Option<Vec<String>>,
-    example: Option<String>,
-}
-
-// Structs used to deserialize the output of the chuck norris joke api call.
-#[derive(Debug, Deserialize)]
-struct ChuckResponse {
-    categories: Option<Vec<String>>,
-    value: Option<String>,
-}
-
-// Structs used to create reaction based polls.
-struct Poll {
-    emoji: char,
-    option: String,
-    votes: u64,
-}
-
-impl Poll {
-    fn new(emoji: char, option: &str, votes: u64) -> Poll {
-        Poll {
-            emoji: emoji,
-            option: option.to_string(),
-            votes: votes,
-        }
-    }
-}
 
 /// Sends a qr code of the term mentioned.
 ///
@@ -120,12 +55,7 @@ async fn qr(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[min_args(1)]
 async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let term = args.message();
-    let url = Url::parse_with_params(
-        "http://api.urbandictionary.com/v0/define",
-        &[("term", term)],
-    )?;
-    let reqwest = ReqwestClient::new();
-    let resp = reqwest.get(url).send().await?.json::<UrbanList>().await?;
+    let resp = urban_dict(term.to_string()).await?;
     if resp.list.is_empty() {
         msg.channel_id
             .say(ctx, format!("The term '{}' has no Urban Definitions", term))
@@ -196,23 +126,9 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[min_args(2)]
 async fn translate(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let target = args.single::<String>()?;
-    let text = args.rest();
-    let url = Url::parse_with_params(
-        "https://translate.googleapis.com/translate_a/single",
-        &[
-            ("client", "gtx"),
-            ("ie", "UTF-8"),
-            ("oe", "UTF-8"),
-            ("dt", "t"),
-            ("sl", "auto"),
-            ("tl", &target),
-            ("q", &text),
-        ],
-    )?;
-    let reqwest = ReqwestClient::new();
-    let resp = reqwest.get(url).send().await?.text().await?;
-    let idx = resp.find(&format!("\",\"{}\"", text)).unwrap();
-    let translated = resp.get(4..idx).unwrap();
+    let text = args.rest().to_string();
+    let translated = get_translate(&target, &text).await?;
+    println!("{}", translated);
     msg.channel_id
         .send_message(ctx, |m| m.content(translated))
         .await?;
@@ -470,23 +386,12 @@ async fn dictionary(ctx: &Context, msg: &Message, mut args: Args) -> CommandResu
     } else {
         lang = "en".to_string();
     }
-
-    let url = format!(
-        "https://api.dictionaryapi.dev/api/v2/entries/{}/{}",
-        lang, word
-    );
-    let reqwest = ReqwestClient::new();
-    let resp = reqwest
-        .get(&url)
-        .send()
-        .await?
-        .json::<Vec<DictionaryElement>>()
-        .await;
-    let definitions = if let Ok(x) = resp {
-        x
-    } else {
-        msg.channel_id.say(ctx, "That word does not exist.").await?;
-        return Ok(());
+    let definitions = match define_term(word, lang).await {
+        Ok(x) => x,
+        Err(_) => {
+            msg.channel_id.say(ctx, "That word does not exist.").await?;
+            return Ok(());
+        }
     };
     for definition in &definitions {
         msg.channel_id
@@ -535,6 +440,23 @@ async fn dictionary(ctx: &Context, msg: &Message, mut args: Args) -> CommandResu
             .await?;
     }
     Ok(())
+}
+
+// Structs used to create reaction based polls.
+struct Poll {
+    emoji: char,
+    option: String,
+    votes: u64,
+}
+
+impl Poll {
+    fn new(emoji: char, option: &str, votes: u64) -> Poll {
+        Poll {
+            emoji: emoji,
+            option: option.to_string(),
+            votes: votes,
+        }
+    }
 }
 
 /// Create a poll.
@@ -680,13 +602,7 @@ async fn poll(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 /// Get a random Chuck Norris joke.
 #[command]
 async fn chuck(ctx: &Context, msg: &Message) -> CommandResult {
-    let client = reqwest::Client::new();
-    let resp = client
-        .get("https://api.chucknorris.io/jokes/random")
-        .send()
-        .await?
-        .json::<ChuckResponse>()
-        .await?;
+    let resp = get_chuck().await?;
     msg.channel_id
         .send_message(ctx, |m| {
             m.content(
@@ -810,13 +726,7 @@ async fn uwufy(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 /// Get a random fact.
 #[command]
 async fn fact(ctx: &Context, msg: &Message) -> CommandResult {
-    let client = reqwest::Client::new();
-    let resp = client
-        .get("https://nekos.life/api/v2/fact")
-        .send()
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
+    let resp = neko_api("fact", false).await?;
     msg.channel_id
         .send_message(ctx, |m| {
             m.content(
@@ -831,13 +741,7 @@ async fn fact(ctx: &Context, msg: &Message) -> CommandResult {
 /// Why?.
 #[command]
 async fn why(ctx: &Context, msg: &Message) -> CommandResult {
-    let client = reqwest::Client::new();
-    let resp = client
-        .get("https://nekos.life/api/v2/why")
-        .send()
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
+    let resp = neko_api("why", false).await?;
     msg.channel_id
         .send_message(ctx, |m| {
             m.content(resp.get("why").unwrap_or(&"Why".to_string()))
@@ -849,20 +753,13 @@ async fn why(ctx: &Context, msg: &Message) -> CommandResult {
 /// Eightball.
 #[command]
 async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
-    let client = reqwest::Client::new();
-    let resp = client
-        .get("https://nekos.life/api/v2/8ball")
-        .send()
-        .await?
-        .json::<HashMap<String, String>>()
-        .await?;
+    let resp = neko_api("8ball", false).await?;
     if let Some(response) = resp.get("response") {
         if let Some(url) = resp.get("url") {
             msg.channel_id
                 .send_message(ctx, |m| {
                     m.embed(|e| {
-                        e.title("Eightball");
-                        e.description(response);
+                        e.title(response);
                         e.image(url)
                     })
                 })
