@@ -117,7 +117,9 @@ async fn trivia(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             if !scores.contains_key(&m.author.id) {
                 scores.insert(m.author.id, 0);
             }
-            if normalized_levenshtein(&m.content.to_lowercase(), &answer.to_lowercase()) > 0.9 {
+            let distance =
+                normalized_levenshtein(&m.content.to_lowercase(), &answer.to_lowercase());
+            if distance > 0.9 {
                 collector.stop();
                 let _ = m.react(ctx, '✔').await;
                 let _s = scores.get_mut(&m.author.id).unwrap();
@@ -136,6 +138,8 @@ async fn trivia(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     .await?;
                 answered = true;
                 break;
+            } else if distance > 0.8 {
+                let _ = m.react(ctx, '🤏').await;
             } else {
                 let _ = m.react(ctx, '❌').await;
             }
