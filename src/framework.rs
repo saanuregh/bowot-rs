@@ -1,7 +1,7 @@
 use crate::{
     commands::{
-        configuration::*, economy::*, fun::*, hydrate::*, meta::*, moderation::*, music::*,
-        reddit::*, roleplay::*,
+        configuration::*, economy::*, fun::*, games::*, hydrate::*, meta::*, moderation::*,
+        music::*, reddit::*, roleplay::*,
     },
     database::*,
     MongoClient,
@@ -59,6 +59,13 @@ struct Meta;
     respect
 )]
 struct Fun;
+
+// The GAMES command group.
+// Small fun games.
+#[group("Games")]
+#[description = "Small fun games."]
+#[commands(trivia)]
+struct Games;
 
 // The Roleplay command group.
 // Where all the random roleplay goes into.
@@ -287,6 +294,7 @@ pub async fn get_framework(owners: HashSet<UserId>, bot_id: UserId) -> StandardF
         .unrecognised_command(unrecognised_command)
         .group(&META_GROUP)
         .group(&FUN_GROUP)
+        .group(&GAMES_GROUP)
         .group(&ROLEPLAY_GROUP)
         .group(&ECONOMY_GROUP)
         .group(&REDDIT_GROUP)

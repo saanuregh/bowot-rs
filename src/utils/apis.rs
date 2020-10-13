@@ -1,7 +1,7 @@
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::{collections::HashMap, error::Error};
+use std::{collections::HashMap, error::Error, str::FromStr};
 
 pub type ApiError = Box<dyn Error + Send + Sync>;
 
@@ -209,4 +209,139 @@ pub async fn get_translate<S: Into<String>>(target: S, text: S) -> Result<String
         .as_str()
         .unwrap()
         .to_string())
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct TriviaResponse {
+    pub response_code: u8,
+    pub results: Vec<TriviaResult>,
+}
+#[derive(Clone, Deserialize, Debug)]
+pub struct TriviaResult {
+    pub category: String,
+    #[serde(rename = "type")]
+    pub question_type: String,
+    pub difficulty: String,
+    pub question: String,
+    pub correct_answer: String,
+    pub incorrect_answers: Vec<String>,
+}
+
+#[derive(Copy, Clone, Deserialize, Debug)]
+pub enum TriviaCategory {
+    Any = 0,
+    GeneralKnowledge = 9,
+    EntertainmentBooks = 10,
+    EntertainmentFilm = 11,
+    EntertainmentMusic = 12,
+    EntertainmentMusicalsAndTheatres = 13,
+    EntertainmentTelevision = 14,
+    EntertainmentVideoGames = 15,
+    EntertainmentBoardGames = 16,
+    ScienceNature = 17,
+    ScienceComputers = 18,
+    ScienceMathematics = 19,
+    Mythology = 20,
+    Sports = 21,
+    Geography = 22,
+    History = 23,
+    Politics = 24,
+    Art = 25,
+    Celebrities = 26,
+    Animals = 27,
+    Vehicles = 28,
+    EntertainmentComics = 29,
+    ScienceGadgets = 30,
+    EntertainmentJapaneseAnimeAndManga = 31,
+    EntertainmentCartoonAndAnimations = 32,
+}
+
+impl FromStr for TriviaCategory {
+    type Err = ApiError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let i = s.parse::<usize>()?;
+        Ok(match i {
+            0 => TriviaCategory::Any,
+            9 => TriviaCategory::GeneralKnowledge,
+            10 => TriviaCategory::EntertainmentBooks,
+            11 => TriviaCategory::EntertainmentFilm,
+            12 => TriviaCategory::EntertainmentMusic,
+            13 => TriviaCategory::EntertainmentMusicalsAndTheatres,
+            14 => TriviaCategory::EntertainmentTelevision,
+            15 => TriviaCategory::EntertainmentVideoGames,
+            16 => TriviaCategory::EntertainmentBoardGames,
+            17 => TriviaCategory::ScienceNature,
+            18 => TriviaCategory::ScienceComputers,
+            19 => TriviaCategory::ScienceMathematics,
+            20 => TriviaCategory::Mythology,
+            21 => TriviaCategory::Sports,
+            22 => TriviaCategory::Geography,
+            23 => TriviaCategory::History,
+            24 => TriviaCategory::Politics,
+            25 => TriviaCategory::Art,
+            26 => TriviaCategory::Celebrities,
+            27 => TriviaCategory::Animals,
+            28 => TriviaCategory::Vehicles,
+            29 => TriviaCategory::EntertainmentComics,
+            30 => TriviaCategory::ScienceGadgets,
+            31 => TriviaCategory::EntertainmentJapaneseAnimeAndManga,
+            32 => TriviaCategory::EntertainmentCartoonAndAnimations,
+            _ => {
+                return Err("Invalid digit".into());
+            }
+        })
+    }
+}
+#[derive(Copy, Clone, Deserialize, Debug)]
+pub enum TriviaDifficulty {
+    Any,
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl FromStr for TriviaDifficulty {
+    type Err = ApiError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
+            "any" => TriviaDifficulty::Any,
+            "easy" => TriviaDifficulty::Easy,
+            "medium" => TriviaDifficulty::Medium,
+            "hard" => TriviaDifficulty::Hard,
+            _ => {
+                return Err("Parse error".into());
+            }
+        })
+    }
+}
+
+impl TriviaDifficulty {
+    pub fn value(&self) -> &str {
+        match *self {
+            TriviaDifficulty::Any => "0",
+            TriviaDifficulty::Easy => "easy",
+            TriviaDifficulty::Medium => "medium",
+            TriviaDifficulty::Hard => "hard",
+        }
+    }
+}
+
+pub async fn get_trivia(
+    amount: usize,
+    category: TriviaCategory,
+    difficulty: TriviaDifficulty,
+) -> Result<TriviaResponse, ApiError> {
+    Ok(Client::new()
+        .get("https://opentdb.com/api.php")
+        .query(&[
+            ("amount", amount.to_string()),
+            ("category", (category as u8).to_string()),
+            ("difficulty", difficulty.value().to_string()),
+        ])
+        .send()
+        .await?
+        .json::<TriviaResponse>()
+        .await?)
 }
