@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let std_framework = get_framework(owners, bot_id).await;
 
-    let mut client = Client::new(&bot_token)
+    let mut client = Client::builder(&bot_token)
         .event_handler(Handler)
         .framework(std_framework)
         .await?;

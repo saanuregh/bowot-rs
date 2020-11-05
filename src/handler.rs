@@ -6,7 +6,7 @@ use serenity::{
     model::{
         channel::Message,
         gateway::Ready,
-        guild::{Guild as DiscordGuild, Member as DiscordMember, PartialGuild, Role},
+        guild::{Guild as DiscordGuild, Member as DiscordMember, GuildUnavailable, Role},
         id::{GuildId, RoleId},
         user::User,
     },
@@ -79,7 +79,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn guild_delete(&self, ctx: Context, guild: PartialGuild, _full: Option<DiscordGuild>) {
+    async fn guild_delete(&self, ctx: Context, guild: GuildUnavailable, _full: Option<DiscordGuild>) {
         let guild_id = guild.id.0 as i64;
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
