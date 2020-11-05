@@ -375,7 +375,8 @@ async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
             }
             let source = match voice::ytdl(&now_playing.url).await {
                 Ok(source) => source,
-                Err(_) => {
+                Err(why) => {
+                    error!("Error getting source: {:?}", why);
                     continue;
                 }
             };
