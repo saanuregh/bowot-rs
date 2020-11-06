@@ -203,6 +203,7 @@ async fn clear(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .await?;
             tokio::time::delay_for(std::time::Duration::from_secs(5)).await;
             success_msg.delete(ctx).await?;
+            msg.delete(ctx).await?;
         }
     }
     Ok(())
