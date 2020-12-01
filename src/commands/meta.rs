@@ -20,21 +20,27 @@ use walkdir::WalkDir;
 /// This command just sends an invite of the bot with the required permissions.
 #[command]
 async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
+    let _p = vec![
+        Permissions::MANAGE_GUILD,
+        Permissions::MANAGE_ROLES,
+        Permissions::MANAGE_CHANNELS,
+        Permissions::KICK_MEMBERS,
+        Permissions::BAN_MEMBERS,
+        Permissions::CREATE_INVITE,
+        Permissions::MANAGE_WEBHOOKS,
+        Permissions::READ_MESSAGES,
+        Permissions::SEND_MESSAGES,
+        Permissions::MANAGE_MESSAGES,
+        Permissions::EMBED_LINKS,
+        Permissions::ATTACH_FILES,
+        Permissions::READ_MESSAGE_HISTORY,
+        Permissions::USE_EXTERNAL_EMOJIS,
+        Permissions::ADD_REACTIONS,
+        Permissions::SPEAK,
+        Permissions::CONNECT,
+    ];
     let mut permissions = Permissions::empty();
-    permissions.set(Permissions::READ_MESSAGES, true);
-    permissions.set(Permissions::MANAGE_MESSAGES, true);
-    permissions.set(Permissions::MANAGE_CHANNELS, true);
-    permissions.set(Permissions::MANAGE_WEBHOOKS, true);
-    permissions.set(Permissions::READ_MESSAGE_HISTORY, true);
-    permissions.set(Permissions::USE_EXTERNAL_EMOJIS, true);
-    permissions.set(Permissions::ADD_REACTIONS, true);
-    permissions.set(Permissions::SEND_MESSAGES, true);
-    permissions.set(Permissions::SPEAK, true);
-    permissions.set(Permissions::EMBED_LINKS, true);
-    permissions.set(Permissions::CONNECT, true);
-    permissions.set(Permissions::MANAGE_ROLES, true);
-    permissions.set(Permissions::KICK_MEMBERS, true);
-    permissions.set(Permissions::BAN_MEMBERS, true);
+    _p.iter().for_each(|&p| permissions.set(p, true));
     let url = ctx
         .cache
         .current_user()
@@ -45,23 +51,26 @@ async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
         m.embed( |e| {
             e.title("Invite Link");
             e.url(url);
-            e.description("Keep in mind, this bot is still in pure developement, so not all of this mentioned features are implemented.\n\n__**Reason for each permission**__");
+            e.description("__**Reason for each permission**__");
             e.fields(vec![
-                     ("Read Messages", "So the bot can read the messages to know when a command was invoked and such.", true),
-                     ("Manage Messages", "Be able to manage messages, like for clear command.", true),
-                     ("Manage Channels", "Be able to mute members on the channel without having to create a role for it.", true),
-                     ("Manage Webhooks", "For all the commands that can be ran on a schedule, so it's more efficient.", true),
-                     ("Manage Roles", "Be able to manage roles of server and members.", true),
-                     ("Read Message History", "This is a required permission for every paginated command.", true),
-                     ("Use External Emojis", "For all the commands that use emojis for better emphasis.", true),
-                     ("Add Reactions", "To be able to add reactions for all the paginated commands.", true),
-                     ("Send Messages", "So the bot can send the messages it needs to send.", true),
-                     ("Speak", "To be able to play music on that voice channel.", true),
-                     ("Embed Links", "For the tags to be able to embed images.", true),
-                     ("Connect", "To be able to connect to a voice channel.", true),
-                     ("Kick Members", "Kick/GhostBan moderation command.", true),
-                     ("Ban Members", "Ban moderation command.", true),
-            ]);
+                ("Manage Guild", "Be able to manage server.", true),
+                ("Manage Roles", "Be able to manage roles of server and members.", true),
+                ("Manage Channels", "Be able to mute members on the channel without having to create a role for it.", true),
+                ("Kick Members", "Kick/GhostBan moderation command.", true),
+                ("Ban Members", "Ban moderation command.", true),
+                ("Create Invite", "Allow creation of rich invite.", true),
+                ("Manage Webhooks", "For all the commands that can be ran on a schedule, so it's more efficient.", true),
+                ("Read Messages", "So the bot can read the messages to know when a command was invoked and such.", true),
+                ("Send Messages", "So the bot can send the messages it needs to send.", true),
+                ("Manage Messages", "Be able to manage messages, like for clear command.", true),
+                ("Embed Links", "For the tags to be able to embed images.", true),
+                ("Attach Files", "For the tags to be able to attach files.", true),
+                ("Read Message History", "This is a required permission for every paginated command.", true),
+                ("Use External Emojis", "For all the commands that use emojis for better emphasis.", true),
+                ("Add Reactions", "To be able to add reactions for all the paginated commands.", true),
+                ("Speak", "To be able to play music on that voice channel.", true),
+                ("Connect", "To be able to connect to a voice channel.", true),
+       ]);
             e
         });
 
