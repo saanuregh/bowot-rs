@@ -2,7 +2,6 @@ mod commands;
 mod database;
 mod framework;
 mod handler;
-mod player;
 mod service;
 mod utils;
 
@@ -10,12 +9,7 @@ use database::*;
 use framework::*;
 use handler::Handler;
 
-use std::{
-    clone::Clone,
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Instant,
-};
+use std::{clone::Clone, collections::HashSet, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::{error, info, instrument, Level};
 use tracing_log::LogTracer;
@@ -23,20 +17,17 @@ use tracing_subscriber::FmtSubscriber;
 
 use itconfig::*;
 use serenity::{
-    client::{
-        bridge::{gateway::ShardManager, voice::ClientVoiceManager},
-        Client,
-    },
+    client::{bridge::gateway::ShardManager, Client},
     http::Http,
-    prelude::{RwLock, TypeMapKey},
+    prelude::TypeMapKey,
 };
 use wither::mongodb::Client as Mongo;
+
+use songbird::SerenityInit;
 
 struct ShardManagerContainer; // Shard manager to use for the latency.
 struct MongoClient; // The connection to the mongo database.
 struct Uptime; //  This is for the startup time of the bot.
-struct VoiceManager; //  This is the struct for the voice manager.
-struct PlayerManager; //  This is the struct for the player manager.
 
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
@@ -48,14 +39,6 @@ impl TypeMapKey for MongoClient {
 
 impl TypeMapKey for Uptime {
     type Value = Instant;
-}
-
-impl TypeMapKey for VoiceManager {
-    type Value = Arc<Mutex<ClientVoiceManager>>;
-}
-
-impl TypeMapKey for PlayerManager {
-    type Value = Arc<RwLock<HashMap<u64, player::Player>>>;
 }
 
 #[tokio::main(core_threads = 8)]
@@ -93,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut client = Client::builder(&bot_token)
         .event_handler(Handler)
         .framework(std_framework)
+        .register_songbird()
         .await?;
 
     // Block to define global data.
@@ -112,14 +96,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Add the shard manager to the data.
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
 
-        // Add the Voice Manager.
-        data.insert::<VoiceManager>(Arc::clone(&client.voice_manager));
-
         // Set current time as the uptime.
         data.insert::<Uptime>(Instant::now());
-
-        // Add the PlayerManager set.
-        data.insert::<PlayerManager>(Arc::new(RwLock::new(HashMap::new())));
     }
 
     // start listening for events by starting a single shard

@@ -6,7 +6,7 @@ use serenity::{
     model::{
         channel::Message,
         gateway::Ready,
-        guild::{Guild as DiscordGuild, Member as DiscordMember, GuildUnavailable, Role},
+        guild::{Guild as DiscordGuild, GuildUnavailable, Member as DiscordMember, Role},
         id::{GuildId, RoleId},
         user::User,
     },
@@ -19,13 +19,16 @@ pub struct Handler; // Defines the handler to be used for events.
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, ready: Ready) {
+    async fn ready(&self, _ctx: Context, ready: Ready) {
+        info!("{} is ready!", ready.user.name);
+    }
+
+    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
         let ctx = Arc::new(ctx.clone());
         if (get_env_or_default::<bool, bool>("ENABLE_SERVICES", true)) {
             info!("Starting services");
             tokio::join!(service_loop(ctx));
         }
-        info!("{} is ready!", ready.user.name);
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
@@ -79,7 +82,12 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn guild_delete(&self, ctx: Context, guild: GuildUnavailable, _full: Option<DiscordGuild>) {
+    async fn guild_delete(
+        &self,
+        ctx: Context,
+        guild: GuildUnavailable,
+        _full: Option<DiscordGuild>,
+    ) {
         let guild_id = guild.id.0 as i64;
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();

@@ -114,10 +114,11 @@ struct Hydrate;
     shuffle,
     queue,
     clear_queue,
-    repeat,
+    // repeat,
     remove,
     now_playing,
-    lyrics
+    // lyrics
+    lofi
 )]
 struct Music;
 

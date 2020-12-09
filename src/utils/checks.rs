@@ -1,15 +1,16 @@
 use serenity::{
-    framework::standard::{macros::check, CheckResult},
+    framework::standard::{macros::check, Reason},
     model::channel::Message,
     prelude::Context,
 };
 
 #[check]
 #[name = "bot_has_manage_messages"]
-pub async fn bot_has_manage_messages_check(ctx: &Context, msg: &Message) -> CheckResult {
+pub async fn bot_has_manage_messages_check(ctx: &Context, msg: &Message) -> Result<(), Reason> {
     let bot_id = ctx.cache.current_user().await.id.0;
-    let err = CheckResult::new_user(
-        "I'm unable to run this command due to missing the `Manage Messages` permission.",
+    let err = Reason::User(
+        "I'm unable to run this command due to missing the `Manage Messages` permission."
+            .to_string(),
     );
     if let Some(guild) = msg.channel(ctx).await.unwrap().guild() {
         if !guild
@@ -18,18 +19,18 @@ pub async fn bot_has_manage_messages_check(ctx: &Context, msg: &Message) -> Chec
             .expect("what even")
             .manage_messages()
         {
-            err
+            Err(err)
         } else {
-            CheckResult::Success
+            Ok(())
         }
     } else {
-        err
+        Err(err)
     }
 }
 
 #[check]
 #[name = "bot_has_manage_roles"]
-pub async fn bot_has_manage_roles_check(ctx: &Context, msg: &Message) -> CheckResult {
+pub async fn bot_has_manage_roles_check(ctx: &Context, msg: &Message) -> Result<(), Reason> {
     let bot_id = ctx.cache.current_user().await.id.0;
     if !ctx
         .http
@@ -41,10 +42,11 @@ pub async fn bot_has_manage_roles_check(ctx: &Context, msg: &Message) -> CheckRe
         .expect("What even 2")
         .manage_roles()
     {
-        CheckResult::new_user(
-            "I'm unable to run this command due to missing the `Manage Roles` permission.",
-        )
+        Err(Reason::User(
+            "I'm unable to run this command due to missing the `Manage Roles` permission."
+                .to_string(),
+        ))
     } else {
-        CheckResult::Success
+        Ok(())
     }
 }

@@ -1,21 +1,30 @@
-use crate::{
-    player::{Player, Repeat, Track},
-    utils::{apis::get_lyrics, basic_functions::shorten},
-    PlayerManager, VoiceManager,
-};
+use crate::utils::basic_functions::shorten;
+use rand::Rng;
 use regex::Regex;
 use serde_json;
 use serenity::{
+    async_trait,
     builder::CreateMessage,
-    framework::standard::{macros::command, Args, CommandResult},
-    model::{channel::Message, misc::Mentionable},
-    prelude::Context,
-    voice,
+    client::Context,
+    framework::standard::{macros::command, Args, CommandResult, Delimiter},
+    http::Http,
+    model::{channel::Message, prelude::ChannelId},
+    prelude::Mutex,
 };
-use serenity_utils::menu::{Menu, MenuOptions};
-use std::{sync::Arc, time::Duration};
+
+use std::{
+    sync::atomic::Ordering,
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
+};
 use tracing::error;
 use youtube_dl::{YoutubeDl, YoutubeDlOutput};
+
+use songbird::{
+    input::Metadata,
+    input::{ytdl, Input},
+    Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent,
+};
 
 const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
 const QUEUE_EMPTY_MSG: &str = "The queue is empty";
@@ -23,37 +32,101 @@ const NOTIN_VC_MSG: &str = "Not in a voice channel";
 const NOTHING_PLAYING: &str = "Nothing playing";
 const MAX_PLAYLIST: usize = 25;
 
-pub async fn _join(ctx: &Context, msg: &Message) -> Option<String> {
-    let guild = msg.guild(&ctx.cache).await.unwrap();
-    let guild_id = guild.id;
-    let channel_id = guild
-        .voice_states
-        .get(&msg.author.id)
-        .and_then(|voice_state| voice_state.channel_id);
+struct TrackEndNotifier {
+    chan_id: ChannelId,
+    http: Arc<Http>,
+    handler_lock: Arc<Mutex<Call>>,
+}
 
-    let connect_to = match channel_id {
-        Some(channel) => channel,
-        None => {
-            return None;
+#[async_trait]
+impl VoiceEventHandler for TrackEndNotifier {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        if let EventContext::Track(_track_list) = ctx {
+            let handler = self.handler_lock.lock().await;
+            if let Some(np) = handler.queue().current() {
+                let metadata = np.metadata();
+                if let Err(why) = self
+                    .chan_id
+                    .send_message(&self.http, |m| {
+                        _now_playing_embed(m, metadata.as_ref().clone());
+                        m
+                    })
+                    .await
+                {
+                    error!("Error sending message: {:?}", why);
+                }
+            } else {
+                if let Err(why) = self.chan_id.say(&self.http, "Queue finished").await {
+                    error!("Error sending message: {:?}", why);
+                }
+            }
         }
-    };
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let pm_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManager in TypeMap");
-    let mut manager = manager_lock.lock().await;
-    if manager.join(guild_id, connect_to).is_some() {
-        let mut pm = pm_lock.write().await;
-        pm.insert(guild_id.0 as u64, Player::new(guild_id));
-        Some(connect_to.mention())
-    } else {
+
         None
     }
+}
+
+struct ChannelIdleChecker {
+    handler_lock: Arc<Mutex<Call>>,
+    elapsed: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl VoiceEventHandler for ChannelIdleChecker {
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        let mut handler = self.handler_lock.lock().await;
+        if handler.queue().is_empty() {
+            if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) > 15 {
+                let _ = handler.leave().await;
+            }
+        } else {
+            self.elapsed.store(0, Ordering::Relaxed);
+        }
+
+        None
+    }
+}
+
+async fn _join(ctx: &Context, msg: &Message) -> Option<Arc<Mutex<Call>>> {
+    let guild = msg.guild(&ctx.cache).await.unwrap();
+    if let Some(connect_to) = guild
+        .voice_states
+        .get(&msg.author.id)
+        .and_then(|voice_state| voice_state.channel_id)
+    {
+        let manager = songbird::get(ctx)
+            .await
+            .expect("Songbird Voice client placed in at initialisation.")
+            .clone();
+        let (handler_lock, success) = manager.join(guild.id, connect_to).await;
+        if let Err(why) = success {
+            error!("Error while joining voice channel: {:?}", why);
+
+            return None;
+        }
+        {
+            let mut handler = handler_lock.lock().await;
+            handler.add_global_event(
+                Event::Track(TrackEvent::End),
+                TrackEndNotifier {
+                    chan_id: msg.channel_id,
+                    http: ctx.http.clone(),
+                    handler_lock: handler_lock.clone(),
+                },
+            );
+            handler.add_global_event(
+                Event::Periodic(Duration::from_secs(60), None),
+                ChannelIdleChecker {
+                    handler_lock: handler_lock.clone(),
+                    elapsed: Default::default(),
+                },
+            );
+        }
+
+        return Some(handler_lock);
+    }
+
+    None
 }
 
 /// Joins me to the voice channel you are currently on.
@@ -73,130 +146,15 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let mut manager = manager_lock.lock().await;
-    if let Some(handler) = manager.get_mut(guild_id) {
-        let pm_lock = data
-            .get::<PlayerManager>()
-            .cloned()
-            .expect("Expected PlayerManager in TypeMap");
-        let mut pm = pm_lock.write().await;
-        if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-            if !player.is_finished().await {
-                player.reset();
-                handler.stop();
-            }
-            pm.remove(&(guild_id.0 as u64));
-        }
-        manager.remove(guild_id);
-        msg.react(ctx, '✅').await?;
-    } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Show the song queue.
-#[command]
-async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let player_lock = ctx
-        .data
-        .read()
+    let manager = songbird::get(ctx)
         .await
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let pm = player_lock.read().await;
-    if let Some(player) = pm.get(&(guild_id.0 as u64)) {
-        let queue = player.clone().queue;
-        if !queue.is_empty() {
-            let mut queue_str = String::new();
-            queue_str += &format!(
-                "__**Now playing:**__\n```yaml\n{} | {}\n```",
-                shorten(&queue[0].title, 40),
-                _duration_format(&queue[0])
-            );
-            if queue.len() > 1 {
-                queue_str += "\n__**Queue:**__\n```yaml\n";
-                for (index, track) in queue[1..].iter().take(10).enumerate() {
-                    queue_str += &format!(
-                        "{}: {} | {}\n",
-                        index + 1,
-                        shorten(&track.title, 40),
-                        _duration_format(&queue[0])
-                    );
-                }
-                if queue.len() > 10 {
-                    queue_str += &format!("... {}", queue.len());
-                }
-                queue_str += "\n```";
-            }
-            queue_str = queue_str.replace("@", "@\u{200B}");
-            msg.channel_id
-                .send_message(ctx.clone(), |m| {
-                    m.embed(|e| {
-                        e.description(&queue_str);
-                        e
-                    })
-                })
-                .await?;
-        } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if manager.get(guild_id).is_some() {
+        if let Err(e) = manager.remove(guild_id).await {
+            msg.channel_id.say(ctx, format!("Failed: {:?}", e)).await?;
         }
-    } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Clears the song queue.
-#[command]
-async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-        if !player.clone().is_empty() {
-            player.clear_except_np();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
-        }
-    } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Shuffles the song queue.
-#[command]
-async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-        if !player.clone().is_empty() {
-            player.shuffle();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
-        }
+        msg.react(ctx, '✅').await?;
     } else {
         msg.channel_id.say(ctx, JOIN_MSG).await?;
     }
@@ -237,191 +195,221 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     }
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in ShareMap.");
-    let manager = manager_lock.lock().await;
-    let has_joined = manager.get(guild_id).is_some();
-    if !has_joined {
-        drop(manager);
-        if _join(ctx, msg).await.is_none() {
-            msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
-            return Ok(());
-        }
-    }
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    let handler_lock = match manager.get(guild_id) {
+        Some(hl) => hl,
+        None => match _join(ctx, msg).await {
+            Some(hl) => hl,
+            None => {
+                msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
 
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected Player Manger in TypeMap");
-    let mut pm = player_lock.write().await;
-    let player = pm
-        .get_mut(&(guild_id.0 as u64))
-        .expect("No player for this guild available");
+                return Ok(());
+            }
+        },
+    };
+    let loading_msg = msg.channel_id.say(ctx, "Loading...").await?;
+    let mut sources: Vec<Input> = Vec::new();
     if let Ok(result) = YoutubeDl::new(query).run().await {
         match result {
             YoutubeDlOutput::Playlist(p) => {
                 if let Some(playlist) = p.entries {
-                    if playlist.is_empty() {
-                        msg.channel_id
-                            .say(ctx, "Couldn't find any result for the query")
-                            .await?;
-                        return Ok(());
-                    }
                     for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
-                        let track = Track {
-                            url: format!("https://www.youtube.com/watch?v={}", s.id),
-                            title: s.title,
-                            requester: msg.author.id,
-                            live: s.is_live.unwrap_or(false),
-                            thumbnail: s.thumbnail,
-                            duration: s
-                                .duration
-                                .unwrap_or(serde_json::to_value(0).unwrap())
-                                .as_f64()
-                                .unwrap() as u64,
-                        };
-                        player.add_track(track);
-                    }
-                    if playlist.len() > 1 {
-                        msg.channel_id
-                            .say(ctx, format!("__**Queued:**__  `{}` tracks", playlist.len()))
-                            .await?;
-                    } else {
-                        msg.channel_id
-                            .say(
-                                ctx,
-                                format!(
-                                    "__**Queued:**__  `{}` | `{}`",
-                                    player.queue.last().unwrap().title,
-                                    _duration_format(&player.queue.last().unwrap())
-                                ),
-                            )
-                            .await?;
+                        match ytdl(&format!("https://www.youtube.com/watch?v={}", s.id)).await {
+                            Ok(mut source) => {
+                                source.metadata.title = Some(s.title);
+                                sources.push(source)
+                            }
+                            Err(why) => error!("Err starting source: {:?}", why),
+                        }
                     }
                 }
             }
-            YoutubeDlOutput::SingleVideo(s) => {
-                let track = Track {
-                    url: s.webpage_url.unwrap(),
-                    title: s.title.clone(),
-                    requester: msg.author.id,
-                    live: s.is_live.unwrap_or(false),
-                    thumbnail: s.thumbnail,
-                    duration: s
-                        .duration
-                        .unwrap_or(serde_json::to_value(0).unwrap())
-                        .as_f64()
-                        .unwrap() as u64,
-                };
-                player.add_track(track.clone());
-                msg.channel_id
-                    .say(
-                        ctx,
-                        format!(
-                            "__**Queued:**__  `{}` | `{}`",
-                            track.title,
-                            _duration_format(&track)
-                        ),
-                    )
-                    .await?;
-            }
+            YoutubeDlOutput::SingleVideo(s) => match ytdl(&s.webpage_url.clone().unwrap()).await {
+                Ok(mut source) => {
+                    source.metadata.title = Some(s.title);
+                    sources.push(source)
+                }
+                Err(why) => error!("Err starting source: {:?}", why),
+            },
         }
-    } else {
+    }
+    let _ = loading_msg.delete(ctx).await;
+    if sources.is_empty() {
         msg.channel_id
             .say(ctx, "Couldn't find any result for the query")
             .await?;
+
         return Ok(());
     }
-    if player.is_finished().await {
-        let ctx_arc = Arc::new(ctx.clone());
-        let msg_arc = Arc::new(msg.clone());
-        tokio::spawn(async move {
-            _player_worker(ctx_arc, msg_arc).await;
-        });
+    let mut handler = handler_lock.lock().await;
+    let sources_len = sources.len();
+    if sources_len > 1 {
+        msg.channel_id
+            .say(ctx, format!("__**Queued:**__  `{}` tracks", sources_len))
+            .await?;
+    } else {
+        let metadata = sources.first().unwrap().metadata.clone();
+        if handler.queue().current().is_none() {
+            msg.channel_id
+                .send_message(ctx, |m| {
+                    _now_playing_embed(m, metadata);
+                    m
+                })
+                .await?;
+        } else {
+            msg.channel_id
+                .say(
+                    ctx,
+                    format!(
+                        "__**Queued:**__  `{}` | `{}`",
+                        metadata.title.unwrap(),
+                        _duration_format(metadata.duration)
+                    ),
+                )
+                .await?;
+        }
+    }
+    for source in sources {
+        handler.enqueue_source(source)
     }
 
     Ok(())
 }
 
-async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
+/// Stops the current player (clears song queue).
+#[command]
+async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    loop {
-        let data = ctx.data.read().await;
-        let player_lock = data
-            .get::<PlayerManager>()
-            .cloned()
-            .expect("Expected Player Manger in TypeMap");
-        let mut pm = player_lock.write().await;
-        if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-            if player.clone().is_empty() {
-                if let Err(why) = msg.channel_id.say(ctx.clone(), "Queue finished").await {
-                    error!("Player Worker: {:?}", why)
-                }
-                break;
-            }
-            let now_playing = player.clone().queue.first().cloned().unwrap();
-            if let Err(why) = msg
-                .channel_id
-                .send_message(ctx.clone(), |m| {
-                    _now_playing_embed(m, now_playing.clone());
-                    m
-                })
-                .await
-            {
-                error!("Player Worker: {:?}", why)
-            }
-            let source = match voice::ytdl(&now_playing.url).await {
-                Ok(source) => source,
-                Err(why) => {
-                    error!("Error getting source: {:?}", why);
-                    continue;
-                }
-            };
-            let manager_lock = data
-                .get::<VoiceManager>()
-                .cloned()
-                .expect("Expected VoiceManager in ShareMap.");
-            let mut manager = manager_lock.lock().await;
-            let handler = manager.get_mut(guild_id).unwrap();
-            let now_source = handler.play_only(source);
-            player.set_now_source(now_source);
-            drop(manager);
-            drop(pm);
-            loop {
-                let player_lock_2 = data
-                    .get::<PlayerManager>()
-                    .cloned()
-                    .expect("Expected Player Manger in TypeMap");
-                let mut pm_2 = player_lock_2.write().await;
-                if let Some(player_2) = pm_2.get_mut(&(guild_id.0 as u64)) {
-                    if player_2.is_finished().await {
-                        match player_2.repeat {
-                            Repeat::Off => {
-                                player_2.pop();
-                            }
-                            Repeat::One => {}
-                            Repeat::All => {
-                                if let Some(t) = player_2.pop() {
-                                    player_2.push(t);
-                                }
-                            }
-                        }
-
-                        break;
-                    }
-                    drop(pm_2);
-                    tokio::time::delay_for(Duration::from_millis(500)).await;
-                } else {
-                    break;
-                }
-            }
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if queue.current().is_some() {
+            queue.stop();
+            msg.react(ctx, '✅').await?;
         } else {
-            break;
+            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
         }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
     }
+
+    Ok(())
+}
+
+/// Show the song queue.
+#[command]
+async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue().current_queue();
+        if !queue.is_empty() {
+            let mut queue_str = String::new();
+            let metadata = queue[0].metadata();
+            queue_str += &format!(
+                "__**Now playing:**__\n```yaml\n{} | {}\n```",
+                shorten(&metadata.title.clone().unwrap(), 40),
+                _duration_format(metadata.duration)
+            );
+            if queue.len() > 1 {
+                queue_str += "\n__**Queue:**__\n```yaml\n";
+                for (index, track) in queue[1..].iter().take(10).enumerate() {
+                    let metadata = track.metadata();
+                    queue_str += &format!(
+                        "{}: {} | {}\n",
+                        index + 1,
+                        shorten(&metadata.title.clone().unwrap(), 40),
+                        _duration_format(metadata.duration)
+                    );
+                }
+                if queue.len() > 10 {
+                    queue_str += &format!("... {}", queue.len());
+                }
+                queue_str += "\n```";
+            }
+            queue_str = queue_str.replace("@", "@\u{200B}");
+            msg.channel_id
+                .send_message(ctx.clone(), |m| {
+                    m.embed(|e| {
+                        e.description(&queue_str);
+                        e
+                    })
+                })
+                .await?;
+        } else {
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+        }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
+    }
+
+    Ok(())
+}
+
+/// Clears the song queue.
+#[command]
+async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if !queue.is_empty() {
+            queue.modify_queue(|q| q.truncate(1));
+            msg.react(ctx, '✅').await?;
+        } else {
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+        }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
+    }
+
+    Ok(())
+}
+
+/// Shuffles the song queue.
+#[command]
+async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if !queue.is_empty() {
+            queue.modify_queue(|q| {
+                let mut rng = rand::thread_rng();
+                let mut i = q.len();
+                while i >= 2 {
+                    i -= 1;
+                    q.swap(i, rng.gen_range(1, i + 1));
+                }
+            });
+            msg.react(ctx, '✅').await?;
+        } else {
+            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+        }
+    } else {
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
+    }
+
+    Ok(())
 }
 
 /// Skips the current song being played.
@@ -429,24 +417,15 @@ async fn _player_worker(ctx: Arc<Context>, msg: Arc<Message>) {
 #[aliases(next)]
 async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let mut manager = manager_lock.lock().await;
-    if let Some(handler) = manager.get_mut(guild_id) {
-        let player_lock = data
-            .get::<PlayerManager>()
-            .cloned()
-            .expect("Expected PlayerManger in TypeMap");
-        let mut pm = player_lock.write().await;
-        let player = pm
-            .get_mut(&(guild_id.0 as u64))
-            .expect("No player for this guild available");
-        if !player.is_finished().await {
-            player.reset();
-            handler.stop();
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if queue.current().is_some() {
+            let _ = queue.skip();
             msg.react(ctx, '✅').await?;
         } else {
             msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
@@ -462,33 +441,21 @@ async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let manager = manager_lock.lock().await;
-    if manager.get(guild_id).is_none() {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-        return Ok(());
-    }
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    let player = pm
-        .get_mut(&(guild_id.0 as u64))
-        .expect("No player for this guild available");
-    if !player.is_finished().await {
-        if player.is_paused().await {
-            msg.channel_id.say(ctx, "Already paused").await?;
-        } else {
-            player.pause().await;
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if queue.current().is_some() {
+            let _ = queue.pause();
             msg.react(ctx, '✅').await?;
+        } else {
+            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+        msg.channel_id.say(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -499,61 +466,15 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
 #[aliases(unpause)]
 async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let manager = manager_lock.lock().await;
-    if manager.get(guild_id).is_none() {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-        return Ok(());
-    }
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected Player    Manger in TypeMap");
-    let mut pm = player_lock.write().await;
-    let player = pm
-        .get_mut(&(guild_id.0 as u64))
-        .expect("No player for this guild available");
-    if !player.is_finished().await {
-        if !player.is_paused().await {
-            msg.channel_id.say(ctx, "Already playing").await?;
-        } else {
-            player.play().await;
-            msg.react(ctx, '✅').await?;
-        }
-    } else {
-        msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
-    }
-
-    Ok(())
-}
-
-/// Stops the current player (clears song queue).
-#[command]
-async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in TypeMap.");
-    let mut manager = manager_lock.lock().await;
-    if let Some(handler) = manager.get_mut(guild_id) {
-        let player_lock = data
-            .get::<PlayerManager>()
-            .cloned()
-            .expect("Expected PlayerManger in TypeMap");
-        let mut pm = player_lock.write().await;
-        let player = pm
-            .get_mut(&(guild_id.0 as u64))
-            .expect("No player for this guild available");
-        if !player.is_finished().await {
-            player.clear();
-            player.reset();
-            handler.stop();
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if queue.current().is_some() {
+            let _ = queue.resume();
             msg.react(ctx, '✅').await?;
         } else {
             msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
@@ -570,18 +491,18 @@ async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 #[aliases(np, nowplaying, playing)]
 async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-        if !player.is_finished().await {
-            let now_playing = player.clone().queue.first().cloned().unwrap();
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if let Some(np) = queue.current() {
+            let metadata = np.metadata();
             msg.channel_id
-                .send_message(ctx.clone(), |m| {
-                    _now_playing_embed(m, now_playing);
+                .send_message(ctx, |m| {
+                    _now_playing_embed(m, metadata.as_ref().clone());
                     m
                 })
                 .await?;
@@ -595,45 +516,45 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
-/// Change repeat mode.
-///
-/// Usage: `repeat <one|all|off>`
-/// or `repeat one`
-#[command]
-#[num_args(1)]
-async fn repeat(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mode = args.message();
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-        match mode {
-            "one" => {
-                player.set_repeat(Repeat::One);
-                msg.react(ctx, '🔂').await?;
-            }
-            "all" => {
-                player.set_repeat(Repeat::All);
-                msg.react(ctx, '🔁').await?;
-            }
-            "off" => {
-                player.set_repeat(Repeat::Off);
-                msg.react(ctx, '✅').await?;
-            }
-            _ => {
-                msg.channel_id.say(ctx, "Invalid repeat mode").await?;
-            }
-        }
-    } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
-    }
+// /// Change repeat mode.
+// ///
+// /// Usage: `repeat <one|all|off>`
+// /// or `repeat one`
+// #[command]
+// #[num_args(1)]
+// async fn repeat(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+//     let mode = args.message();
+//     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
+//     let data = ctx.data.read().await;
+//     let player_lock = data
+//         .get::<PlayerManager>()
+//         .cloned()
+//         .expect("Expected PlayerManger in TypeMap");
+//     let mut pm = player_lock.write().await;
+//     if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
+//         match mode {
+//             "one" => {
+//                 player.set_repeat(Repeat::One);
+//                 msg.react(ctx, '🔂').await?;
+//             }
+//             "all" => {
+//                 player.set_repeat(Repeat::All);
+//                 msg.react(ctx, '🔁').await?;
+//             }
+//             "off" => {
+//                 player.set_repeat(Repeat::Off);
+//                 msg.react(ctx, '✅').await?;
+//             }
+//             _ => {
+//                 msg.channel_id.say(ctx, "Invalid repeat mode").await?;
+//             }
+//         }
+//     } else {
+//         msg.channel_id.say(ctx, JOIN_MSG).await?;
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// Remove a song from queue.
 ///
@@ -644,17 +565,20 @@ async fn repeat(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let index = args.single::<usize>().unwrap();
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected PlayerManger in TypeMap");
-    let mut pm = player_lock.write().await;
-    if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-        if !player.clone().is_empty() {
-            if let Some(t) = player.remove_track(index) {
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Songbird Voice client placed in at initialisation.")
+        .clone();
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+        let queue = handler.queue();
+        if !queue.is_empty() {
+            if let Some(t) = queue.dequeue(index) {
                 msg.channel_id
-                    .say(ctx, format!("Removed - {}", t.title))
+                    .say(
+                        ctx,
+                        format!("Removed - {}", t.metadata().title.clone().unwrap()),
+                    )
                     .await?;
             } else {
                 msg.channel_id.say(ctx, "Out of bounds").await?;
@@ -669,97 +593,129 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     Ok(())
 }
 
-/// Get lyrics of current song, or search for another.
+/// Play a lofi stream.
 ///
-/// Usage: `lyrics <title>`
-/// or `lyrics` for lyrics of now playing
+/// Usage: `lofi <id>`
+///
+/// Available Channels:
+/// ```
+/// +-----------------+------------------------------+
+/// |       ID        |             URL              |
+/// +-----------------+------------------------------+
+/// | chilledcow      | https://youtu.be/5qap5aO4i9A |
+/// | chilledcow2     | https://youtu.be/DWcJFNfaw9c |
+/// | chillhopmusic   | https://youtu.be/5yx6BWlEVcY |
+/// | chillhopmusic2  | https://youtu.be/7NOSDKb0HlU |
+/// | tokyolosttracks | https://youtu.be/WBfbkPTqUtU |
+/// | thejazzhopcafe  | https://youtu.be/OVPPOwMpSpQ |
+/// | homeworkradio   | https://youtu.be/ZYMuB9y549s |
+/// | steezyasfuck    | https://youtu.be/-5KAN9_CzSA |
+/// | thebootlegboy   | https://youtu.be/l7TxwBhtTUY |
+/// | inyourchill     | https://youtu.be/B8tQ8RUbTW8 |
+/// | collegemusic    | https://youtu.be/bM0Iw7PPoU4 |
+/// +-----------------+------------------------------+
+/// ```
 #[command]
-async fn lyrics(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let title: String = match args.remains() {
-        Some(m) => m.to_string(),
-        None => {
-            let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-            let data = ctx.data.read().await;
-            let player_lock = data
-                .get::<PlayerManager>()
-                .cloned()
-                .expect("Expected PlayerManger in TypeMap");
-            let mut pm = player_lock.write().await;
-            if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-                if !player.is_finished().await {
-                    let now_playing = player.clone().queue.first().cloned().unwrap();
-                    now_playing.title;
-                }
-            }
+#[num_args(1)]
+async fn lofi(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let channel_id = args.message().to_string();
+    let url = match channel_id.as_str() {
+        "chilledcow" => "https://youtu.be/5qap5aO4i9A",
+        "chilledcow2" => "https://youtu.be/DWcJFNfaw9c",
+        "chillhopmusic" => "https://youtu.be/5yx6BWlEVcY",
+        "chillhopmusic2" => "https://youtu.be/7NOSDKb0HlU",
+        "tokyolosttracks" => "https://youtu.be/WBfbkPTqUtU",
+        "thejazzhopcafe" => "https://youtu.be/OVPPOwMpSpQ",
+        "homeworkradio" => "https://youtu.be/ZYMuB9y549s",
+        "steezyasfuck" => "https://youtu.be/-5KAN9_CzSA",
+        "thebootlegboy" => "https://youtu.be/l7TxwBhtTUY",
+        "inyourchill" => "https://youtu.be/B8tQ8RUbTW8",
+        "collegemusic" => "https://youtu.be/bM0Iw7PPoU4",
+        _ => {
             msg.channel_id
                 .say(
                     ctx,
-                    "Currently nothing is playing, please give a song title as argument",
+                    "Invalid channel ID, try `help lofi` for all the available channels.",
                 )
                 .await?;
             return Ok(());
         }
     };
-    match get_lyrics(title.clone()).await {
-        Ok(lyrics) => {
-            let chars: Vec<char> = lyrics.lyrics.chars().collect();
-            let chunks = chars
-                .chunks(2000)
-                .map(|chunk| chunk.iter().collect::<String>())
-                .collect::<Vec<_>>();
-            let pages = chunks
-                .iter()
-                .enumerate()
-                .map(|(i, chunk)| {
-                    let mut p = CreateMessage::default();
-                    p.embed(|e| {
-                        e.footer(|f| f.text(&format!("Page {}/{}", i + 1, chunks.len())));
-                        e.url(&lyrics.links.genius);
-                        e.thumbnail(&lyrics.thumbnail.genius);
-                        e.title(&format!("{} - {}", lyrics.author, lyrics.title));
-                        e.description(chunk);
-                        e
-                    });
-                    p
-                })
-                .collect::<Vec<_>>();
-            let mut menu_options = MenuOptions::default();
-            menu_options.timeout = 180.0;
-            let menu = Menu::new(ctx, msg, &pages, menu_options);
-            menu.run().await?;
-        }
-        Err(_) => {
-            msg.channel_id
-                .say(
-                    ctx,
-                    &format!("Could not find lyrics for the song: `{}`", title),
-                )
-                .await?;
-            return Ok(());
-        }
-    }
+    play(ctx, msg, Args::new(url, &[Delimiter::Single(' ')])).await?;
 
     Ok(())
 }
 
-fn _now_playing_embed(m: &mut CreateMessage, np: Track) {
+// /// Get lyrics of current song, or search for another.
+// ///
+// /// Usage: `lyrics <title>`
+// #[command]
+// #[min_args(1)]
+// async fn lyrics(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+//     let title = args.message().to_string();
+//     match get_lyrics(title.clone()).await {
+//         Ok(lyrics) => {
+//             let chars: Vec<char> = lyrics.lyrics.chars().collect();
+//             let chunks = chars
+//                 .chunks(2000)
+//                 .map(|chunk| chunk.iter().collect::<String>())
+//                 .collect::<Vec<_>>();
+//             let pages = chunks
+//                 .iter()
+//                 .enumerate()
+//                 .map(|(i, chunk)| {
+//                     let mut p = CreateMessage::default();
+//                     p.embed(|e| {
+//                         e.footer(|f| f.text(&format!("Page {}/{}", i + 1, chunks.len())));
+//                         e.url(&lyrics.links.genius);
+//                         e.thumbnail(&lyrics.thumbnail.genius);
+//                         e.title(&format!("{} - {}", lyrics.author, lyrics.title));
+//                         e.description(chunk);
+//                         e
+//                     });
+//                     p
+//                 })
+//                 .collect::<Vec<_>>();
+//             let mut menu_options = MenuOptions::default();
+//             menu_options.timeout = 180.0;
+//             let menu = Menu::new(ctx, msg, &pages, menu_options);
+//             menu.run().await?;
+//         }
+//         Err(_) => {
+//             msg.channel_id
+//                 .say(
+//                     ctx,
+//                     &format!("Could not find lyrics for the song: `{}`", title),
+//                 )
+//                 .await?;
+//             return Ok(());
+//         }
+//     }
+
+//     Ok(())
+// }
+
+fn _now_playing_embed(m: &mut CreateMessage, np: Metadata) {
     m.embed(|e| {
         e.title("Now playing");
-        e.field("Title", &np.title, false);
-        e.field("URL", &np.url, false);
-        e.field("Duration", _duration_format(&np), true);
-        e.field("Requester", np.requester.mention(), true);
-        if np.thumbnail.is_some() {
-            e.thumbnail(np.thumbnail.clone().unwrap());
+        e.field("Title", np.title.clone().unwrap(), false);
+        if let Some(t) = np.source_url {
+            e.field("URL", t, false);
+        }
+        e.field("Duration", _duration_format(np.duration), true);
+        // e.field("Requester", np.requester.mention(), true);
+        if let Some(t) = np.thumbnail {
+            e.thumbnail(t);
         }
         e
     });
 }
 
-fn _duration_format(np: &Track) -> String {
-    if np.live {
-        "Live".to_string()
-    } else {
-        humantime::format_duration(Duration::from_secs(np.duration)).to_string()
+fn _duration_format(duration: Option<Duration>) -> String {
+    if let Some(d) = duration {
+        if d != Duration::default() {
+            return humantime::format_duration(d).to_string();
+        }
     }
+    "Live".to_string()
 }

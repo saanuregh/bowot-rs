@@ -1,4 +1,4 @@
-use crate::{get_all_guilds, MongoClient, PlayerManager, VoiceManager};
+use crate::{get_all_guilds, MongoClient};
 use lazy_static::lazy_static;
 use rand::seq::SliceRandom;
 use serenity::{
@@ -10,8 +10,13 @@ use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info};
 
 lazy_static! {
-    static ref STATUSES: Vec<&'static str> =
-        include_str!("data/statuses.txt").split('\n').collect();
+    static ref STATUSES: Vec<[&'static str; 2]> = include_str!("data/statuses.txt")
+        .split('\n')
+        .map(|l| {
+            let t = l.split(",").collect::<Vec<&'static str>>();
+            [t[0], t[1]]
+        })
+        .collect();
     static ref HYDRATE: Vec<&'static str> = include_str!("data/hydrate.txt").split('\n').collect();
 }
 
@@ -54,50 +59,20 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
 
 async fn status_update(ctx: Arc<Context>) {
     let random_status = STATUSES.choose(&mut rand::thread_rng()).unwrap();
-    ctx.set_presence(Some(Activity::playing(random_status)), OnlineStatus::Online)
+    let activity = match random_status[0] {
+        "playing" => Activity::playing,
+        "competing" => Activity::competing,
+        "listening" => Activity::listening,
+        _ => Activity::playing,
+    };
+    ctx.set_presence(Some(activity(random_status[1])), OnlineStatus::Online)
         .await;
     debug!("Status update done");
-}
-
-async fn check_vc_empty(ctx: Arc<Context>) {
-    let data = ctx.data.read().await;
-    let manager_lock = data
-        .get::<VoiceManager>()
-        .cloned()
-        .expect("Expected VoiceManager in ShareMap.");
-    let player_lock = data
-        .get::<PlayerManager>()
-        .cloned()
-        .expect("Expected Player Manger in TypeMap");
-    for guild_id in &ctx.cache.guilds().await {
-        let mut manager = manager_lock.lock().await;
-        if let Some(handler) = manager.get_mut(guild_id) {
-            let guild = ctx.cache.guild(guild_id).await.unwrap();
-            if let Some(channel) = guild.channels.get(&handler.channel_id.unwrap()) {
-                if let Ok(members) = channel.members(&ctx).await {
-                    if members.len() == 1 {
-                        let mut pm = player_lock.write().await;
-                        if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-                            if !player.is_finished().await {
-                                player.reset();
-                                handler.stop();
-                            }
-                            pm.remove(&(guild_id.0 as u64));
-                        }
-                        manager.remove(guild_id);
-                        info!("Removed VC cause of inactivity in guild: {:?}", guild_id);
-                    }
-                }
-            }
-        }
-    }
-    debug!("VC empty check done");
 }
 
 pub async fn service_loop(ctx: Arc<Context>) {
     let ctx_clone1 = Arc::clone(&ctx);
     let ctx_clone2 = Arc::clone(&ctx);
-    let ctx_clone3 = Arc::clone(&ctx);
     tokio::spawn(async move {
         loop {
             tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone1)));
@@ -108,12 +83,6 @@ pub async fn service_loop(ctx: Arc<Context>) {
         loop {
             tokio::join!(status_update(Arc::clone(&ctx_clone2)));
             tokio::time::delay_for(Duration::from_secs(1800)).await;
-        }
-    });
-    tokio::spawn(async move {
-        loop {
-            tokio::join!(check_vc_empty(Arc::clone(&ctx_clone3)));
-            tokio::time::delay_for(Duration::from_secs(900)).await;
         }
     });
 }
