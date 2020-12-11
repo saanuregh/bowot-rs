@@ -62,10 +62,6 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         let choice = &resp.list[0];
         let parsed_definition = &choice.definition.replace("[", "").replace("]", "");
         let parsed_example = &choice.example.replace("[", "").replace("]", "");
-        let mut fields = vec![("Definition", parsed_definition, false)];
-        if parsed_example != &"".to_string() {
-            fields.push(("Example", parsed_example, false));
-        }
 
         if let Err(why) = msg
             .channel_id
@@ -75,10 +71,9 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                     e.title(&choice.word);
                     e.url(&choice.permalink);
                     e.description(format!(
-                        "submitted by **{}**\n\n:thumbsup: **{}** ┇ **{}** :thumbsdown:\n",
-                        &choice.author, &choice.thumbs_up, &choice.thumbs_down
+                        "submitted by **{}**\n:thumbsup: **{}** ┇ **{}** :thumbsdown:\n\n**Definition**\n{}\n\n**Example**\n{}",
+                        &choice.author, &choice.thumbs_up, &choice.thumbs_down, parsed_definition, parsed_example
                     ));
-                    e.fields(fields);
                     e.timestamp(choice.clone().written_on);
                     e
                 });
