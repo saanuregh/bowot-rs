@@ -30,9 +30,7 @@ async fn qr(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .dark_color(unicode::Dense1x2::Light)
         .light_color(unicode::Dense1x2::Dark)
         .build();
-    msg.channel_id
-        .say(ctx, format!(">>> ```{}```", image))
-        .await?;
+    msg.reply(ctx, format!(">>> ```{}```", image)).await?;
     Ok(())
 }
 
@@ -58,8 +56,7 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let term = args.message();
     let resp = urban_dict(term.to_string()).await?;
     if resp.list.is_empty() {
-        msg.channel_id
-            .say(ctx, format!("The term '{}' has no Urban Definitions", term))
+        msg.reply(ctx, format!("The term '{}' has no Urban Definitions", term))
             .await?;
     } else {
         let choice = &resp.list[0];
@@ -73,6 +70,7 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         if let Err(why) = msg
             .channel_id
             .send_message(ctx, |m| {
+                m.reference_message(msg);
                 m.embed(|e| {
                     e.title(&choice.word);
                     e.url(&choice.permalink);
@@ -89,9 +87,9 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             .await
         {
             if "Embed too large." == why.to_string() {
-                msg.channel_id.say(ctx, &choice.permalink).await?;
+                msg.reply(ctx, &choice.permalink).await?;
             } else {
-                msg.channel_id.say(ctx, why).await?;
+                msg.reply(ctx, why).await?;
             }
         };
     }
@@ -129,10 +127,7 @@ async fn translate(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
     let target = args.single::<String>()?;
     let text = args.rest().to_string();
     let translated = get_translate(&target, &text).await?;
-    println!("{}", translated);
-    msg.channel_id
-        .send_message(ctx, |m| m.content(translated))
-        .await?;
+    msg.reply(ctx, translated).await?;
     Ok(())
 }
 
@@ -144,7 +139,7 @@ async fn translate(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
 #[aliases(ddg, duck, duckduckgo, search, better_than_google, betterthangoogle)]
 async fn duck_duck_go(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let url = Url::parse_with_params("https://lmddgtfy.net/", &[("q", args.message())])?;
-    msg.channel_id.say(ctx, url).await?;
+    msg.reply(ctx, url).await?;
 
     Ok(())
 }
@@ -162,6 +157,7 @@ async fn profile(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
 
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 if user.bot {
                     e.title(format!("[BOT] {}", user.tag(),));
@@ -320,6 +316,7 @@ async fn calculator(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.title("ERROR");
                         e.description(text);
@@ -332,6 +329,7 @@ async fn calculator(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         Ok(res) => {
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.title("Result");
                         e.description(res);
@@ -390,13 +388,14 @@ async fn dictionary(ctx: &Context, msg: &Message, mut args: Args) -> CommandResu
     let definitions = match define_term(word, lang).await {
         Ok(x) => x,
         Err(_) => {
-            msg.channel_id.say(ctx, "That word does not exist.").await?;
+            msg.reply(ctx, "That word does not exist.").await?;
             return Ok(());
         }
     };
     for definition in &definitions {
         msg.channel_id
             .send_message(ctx, |m| {
+                m.reference_message(msg);
                 m.embed(|embed| {
                     embed.title(capitalize_first(&definition.word));
                     if let Some(origin) = &definition.origin {
@@ -508,6 +507,7 @@ async fn poll(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let poll_msg = msg
         .channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title(capitalize_first(&title));
                 let mut text_definitions = String::new();
@@ -604,14 +604,12 @@ async fn poll(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 async fn chuck(ctx: &Context, msg: &Message) -> CommandResult {
     let resp = get_chuck().await?;
-    msg.channel_id
-        .send_message(ctx, |m| {
-            m.content(
-                resp.value
-                    .unwrap_or("Chuck's a little busy here, try again later!".to_string()),
-            )
-        })
-        .await?;
+    msg.reply(
+        ctx,
+        resp.value
+            .unwrap_or("Chuck's a little busy here, try again later!".to_string()),
+    )
+    .await?;
     Ok(())
 }
 
@@ -728,14 +726,12 @@ async fn uwufy(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[command]
 async fn fact(ctx: &Context, msg: &Message) -> CommandResult {
     let resp = neko_api("fact", false).await?;
-    msg.channel_id
-        .send_message(ctx, |m| {
-            m.content(
-                resp.get("fact")
-                    .unwrap_or(&"Couldn't find a fact, try again later!".to_string()),
-            )
-        })
-        .await?;
+    msg.reply(
+        ctx,
+        resp.get("fact")
+            .unwrap_or(&"Couldn't find a fact, try again later!".to_string()),
+    )
+    .await?;
     Ok(())
 }
 
@@ -743,10 +739,7 @@ async fn fact(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 async fn why(ctx: &Context, msg: &Message) -> CommandResult {
     let resp = neko_api("why", false).await?;
-    msg.channel_id
-        .send_message(ctx, |m| {
-            m.content(resp.get("why").unwrap_or(&"Why".to_string()))
-        })
+    msg.reply(ctx, resp.get("why").unwrap_or(&"Why".to_string()))
         .await?;
     Ok(())
 }
@@ -759,6 +752,7 @@ async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
         if let Some(url) = resp.get("url") {
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.title(response);
                         e.image(url)
@@ -768,8 +762,7 @@ async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
             return Ok(());
         }
     }
-    msg.channel_id
-        .send_message(ctx, |m| m.content("Lost the eightball, try again later!"))
+    msg.reply(ctx, "Lost the eightball, try again later!")
         .await?;
     Ok(())
 }
@@ -796,6 +789,7 @@ async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
     }
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title("Custom Commands");
                 e.description(format!("```\n{}\n```", table))
@@ -831,6 +825,7 @@ async fn self_roles(ctx: &Context, msg: &Message) -> CommandResult {
     }
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title("Self roles");
                 e.description(format!("```\n{}\n```", table))
@@ -867,6 +862,7 @@ async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
                 .for_each(|item| fields.push(("Incident", item.description.as_str(), false)));
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.title("Valorant Server Staus");
                         e.fields(fields)
@@ -942,6 +938,7 @@ async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
     );
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title(title[(percentage / (100 / (title.len() - 1)) as u64) as usize]);
                 e.description(format!(
@@ -977,6 +974,7 @@ async fn pp(ctx: &Context, msg: &Message) -> CommandResult {
     let length = user.id.0 % 101;
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title("Dr bowot's PP report");
                 e.description(format!(
@@ -1001,6 +999,7 @@ async fn respect(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let message = args.message();
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.description(format!(
                     "{} has paid their respect to {}.",

@@ -136,7 +136,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     if _join(ctx, msg).await.is_some() {
         msg.react(ctx, '✅').await?;
     } else {
-        msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
+        msg.reply(ctx, NOTIN_VC_MSG).await?;
     }
 
     Ok(())
@@ -152,11 +152,11 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         .clone();
     if manager.get(guild_id).is_some() {
         if let Err(e) = manager.remove(guild_id).await {
-            msg.channel_id.say(ctx, format!("Failed: {:?}", e)).await?;
+            msg.reply(ctx, format!("Failed: {:?}", e)).await?;
         }
         msg.react(ctx, '✅').await?;
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -188,8 +188,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             .await
         {
             if query.starts_with("http") {
-                msg.channel_id
-                    .say(ctx, "Please, put the url between <> so it doesn't embed.")
+                msg.reply(ctx, "Please, put the url between <> so it doesn't embed.")
                     .await?;
             }
         }
@@ -204,13 +203,13 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         None => match _join(ctx, msg).await {
             Some(hl) => hl,
             None => {
-                msg.channel_id.say(ctx, NOTIN_VC_MSG).await?;
+                msg.reply(ctx, NOTIN_VC_MSG).await?;
 
                 return Ok(());
             }
         },
     };
-    let loading_msg = msg.channel_id.say(ctx, "Loading...").await?;
+    let loading_msg = msg.reply(ctx, "Loading...").await?;
     let mut sources: Vec<Input> = Vec::new();
     if let Ok(result) = YoutubeDl::new(query).run().await {
         match result {
@@ -238,8 +237,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
     let _ = loading_msg.delete(ctx).await;
     if sources.is_empty() {
-        msg.channel_id
-            .say(ctx, "Couldn't find any result for the query")
+        msg.reply(ctx, "Couldn't find any result for the query")
             .await?;
 
         return Ok(());
@@ -247,29 +245,28 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut handler = handler_lock.lock().await;
     let sources_len = sources.len();
     if sources_len > 1 {
-        msg.channel_id
-            .say(ctx, format!("__**Queued:**__  `{}` tracks", sources_len))
+        msg.reply(ctx, format!("__**Queued:**__  `{}` tracks", sources_len))
             .await?;
     } else {
         let metadata = sources.first().unwrap().metadata.clone();
         if handler.queue().current().is_none() {
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     _now_playing_embed(m, metadata);
                     m
                 })
                 .await?;
         } else {
-            msg.channel_id
-                .say(
-                    ctx,
-                    format!(
-                        "__**Queued:**__  `{}` | `{}`",
-                        metadata.title.unwrap(),
-                        _duration_format(metadata.duration)
-                    ),
-                )
-                .await?;
+            msg.reply(
+                ctx,
+                format!(
+                    "__**Queued:**__  `{}` | `{}`",
+                    metadata.title.unwrap(),
+                    _duration_format(metadata.duration)
+                ),
+            )
+            .await?;
         }
     }
     for source in sources {
@@ -294,10 +291,10 @@ async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
             queue.stop();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+            msg.reply(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -341,6 +338,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             queue_str = queue_str.replace("@", "@\u{200B}");
             msg.channel_id
                 .send_message(ctx.clone(), |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.description(&queue_str);
                         e
@@ -348,10 +346,10 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
                 })
                 .await?;
         } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -372,10 +370,10 @@ async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
             queue.modify_queue(|q| q.truncate(1));
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -403,10 +401,10 @@ async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
             });
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -428,10 +426,10 @@ async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
             let _ = queue.skip();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+            msg.reply(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -452,10 +450,10 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
             let _ = queue.pause();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+            msg.reply(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -477,10 +475,10 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
             let _ = queue.resume();
             msg.react(ctx, '✅').await?;
         } else {
-            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+            msg.reply(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -502,15 +500,16 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
             let metadata = np.metadata();
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     _now_playing_embed(m, metadata.as_ref().clone());
                     m
                 })
                 .await?;
         } else {
-            msg.channel_id.say(ctx, NOTHING_PLAYING).await?;
+            msg.reply(ctx, NOTHING_PLAYING).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -546,11 +545,11 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
 //                 msg.react(ctx, '✅').await?;
 //             }
 //             _ => {
-//                 msg.channel_id.say(ctx, "Invalid repeat mode").await?;
+//                 msg.reply(ctx, "Invalid repeat mode").await?;
 //             }
 //         }
 //     } else {
-//         msg.channel_id.say(ctx, JOIN_MSG).await?;
+//         msg.reply(ctx, JOIN_MSG).await?;
 //     }
 
 //     Ok(())
@@ -574,20 +573,19 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let queue = handler.queue();
         if !queue.is_empty() {
             if let Some(t) = queue.dequeue(index) {
-                msg.channel_id
-                    .say(
-                        ctx,
-                        format!("Removed - {}", t.metadata().title.clone().unwrap()),
-                    )
-                    .await?;
+                msg.reply(
+                    ctx,
+                    format!("Removed - {}", t.metadata().title.clone().unwrap()),
+                )
+                .await?;
             } else {
-                msg.channel_id.say(ctx, "Out of bounds").await?;
+                msg.reply(ctx, "Out of bounds").await?;
             }
         } else {
-            msg.channel_id.say(ctx, QUEUE_EMPTY_MSG).await?;
+            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
         }
     } else {
-        msg.channel_id.say(ctx, JOIN_MSG).await?;
+        msg.reply(ctx, JOIN_MSG).await?;
     }
 
     Ok(())
@@ -632,12 +630,11 @@ async fn lofi(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         "inyourchill" => "https://youtu.be/B8tQ8RUbTW8",
         "collegemusic" => "https://youtu.be/bM0Iw7PPoU4",
         _ => {
-            msg.channel_id
-                .say(
-                    ctx,
-                    "Invalid channel ID, try `help lofi` for all the available channels.",
-                )
-                .await?;
+            msg.reply(
+                ctx,
+                "Invalid channel ID, try `help lofi` for all the available channels.",
+            )
+            .await?;
             return Ok(());
         }
     };

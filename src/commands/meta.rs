@@ -48,6 +48,7 @@ async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
         .invite_url(ctx, permissions)
         .await?;
     msg.channel_id.send_message(ctx, |m| {
+        m.reference_message(msg);
         m.embed( |e| {
             e.title("Invite Link");
             e.url(url);

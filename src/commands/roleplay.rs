@@ -43,9 +43,7 @@ async fn _neko_command(ctx: &Context, msg: &Message, key: &str) -> CommandResult
             .await?;
         return Ok(());
     }
-    msg.channel_id
-        .send_message(ctx, |m| m.content("Can't find a gif"))
-        .await?;
+    msg.reply(ctx, "Can't find a gif").await?;
     Ok(())
 }
 

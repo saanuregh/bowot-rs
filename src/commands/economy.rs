@@ -154,6 +154,7 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
     }
     msg.channel_id
         .send_message(ctx, |m| {
+            m.reference_message(msg);
             m.embed(|e| {
                 e.title("Leaderboard");
                 e.description(format!("```\n{}\n```", table))

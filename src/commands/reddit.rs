@@ -81,13 +81,12 @@ async fn reddit_command(
 ) -> CommandResult {
     match random_post(subreddits, image).await {
         None => {
-            msg.channel_id
-                .send_message(ctx, |m| m.content("No result found."))
-                .await?;
+            msg.reply(ctx, "No result found.").await?;
         }
         Some(post) => {
             msg.channel_id
                 .send_message(ctx, |m| {
+                    m.reference_message(msg);
                     m.embed(|e| {
                         e.title(&post.title);
                         e.url(format!("https://www.reddit.com{}", &post.permalink));

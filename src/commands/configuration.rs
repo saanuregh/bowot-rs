@@ -1,6 +1,13 @@
 use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, MongoClient};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
-use serenity::{collector::MessageCollectorBuilder, model::id::RoleId, framework::standard::{macros::command, Args, CommandResult}, futures::stream::StreamExt, model::channel::Message, prelude::Context};
+use serenity::{
+    collector::MessageCollectorBuilder,
+    framework::standard::{macros::command, Args, CommandResult},
+    futures::stream::StreamExt,
+    model::channel::Message,
+    model::id::RoleId,
+    prelude::Context,
+};
 use std::time::Duration;
 
 /// Configures the bot for the guild/server it was invoked on.
