@@ -1,6 +1,7 @@
 use crate::{
+    database::Guild,
     utils::{apis::*, basic_functions::*},
-    Guild, MongoClient,
+    MongoClient,
 };
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use fasteval::error::Error;

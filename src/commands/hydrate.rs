@@ -1,4 +1,4 @@
-use crate::{Guild, MongoClient};
+use crate::{database::Guild, MongoClient};
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     model::channel::Message,

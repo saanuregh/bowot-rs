@@ -278,7 +278,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
 }
 
 // Helper function to build serenity command framework
-pub async fn get_framework(owners: HashSet<UserId>, bot_id: UserId) -> StandardFramework {
+pub async fn get_std_framework(owners: HashSet<UserId>, bot_id: UserId) -> StandardFramework {
     StandardFramework::new()
         .configure(|c| {
             c.allow_dm(false)

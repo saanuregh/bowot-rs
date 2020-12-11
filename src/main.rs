@@ -2,12 +2,9 @@ mod commands;
 mod database;
 mod framework;
 mod handler;
+mod lang;
 mod service;
 mod utils;
-
-use database::*;
-use framework::*;
-use handler::Handler;
 
 use std::{clone::Clone, collections::HashSet, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -74,10 +71,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(why) => panic!("Could not access application info: {:?}", why),
     };
 
-    let std_framework = get_framework(owners, bot_id).await;
+    let std_framework = framework::get_std_framework(owners, bot_id).await;
 
     let mut client = Client::builder(&bot_token)
-        .event_handler(Handler)
+        .event_handler(handler::Handler)
         .framework(std_framework)
         .intents({
             let mut intents = GatewayIntents::all();

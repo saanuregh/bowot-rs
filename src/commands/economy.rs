@@ -1,4 +1,4 @@
-use crate::{Guild, MongoClient};
+use crate::{database::Guild, MongoClient};
 use chrono::prelude::*;
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use rand::distributions::WeightedIndex;

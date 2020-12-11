@@ -1,4 +1,4 @@
-use crate::{utils::checks::*, Guild, MongoClient, MASTER_GROUP};
+use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, MongoClient};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use serenity::{
     collector::MessageCollectorBuilder,

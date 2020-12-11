@@ -1,5 +1,8 @@
-use crate::{get_all_guilds, MongoClient};
-use lazy_static::lazy_static;
+use crate::{
+    database::get_all_guilds,
+    lang::{HYDRATE, STATUSES},
+    MongoClient,
+};
 use rand::seq::SliceRandom;
 use serenity::{
     model::{gateway::Activity, id::UserId, user::OnlineStatus},
@@ -8,17 +11,6 @@ use serenity::{
 use std::collections::HashSet;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info};
-
-lazy_static! {
-    static ref STATUSES: Vec<[&'static str; 2]> = include_str!("data/statuses.txt")
-        .split('\n')
-        .map(|l| {
-            let t = l.split(",").collect::<Vec<&'static str>>();
-            [t[0], t[1]]
-        })
-        .collect();
-    static ref HYDRATE: Vec<&'static str> = include_str!("data/hydrate.txt").split('\n').collect();
-}
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();

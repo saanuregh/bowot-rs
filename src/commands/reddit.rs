@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use crate::lang::SUBREDDIT_MEMES;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use regex;
 use reqwest::Client;
@@ -8,12 +8,6 @@ use serenity::{
     model::channel::Message,
     prelude::Context,
 };
-
-lazy_static! {
-    static ref SUBREDDIT_MEMES: Vec<&'static str> = include_str!("data/subreddit_memes.txt")
-        .split('\n')
-        .collect();
-}
 
 // Structs used to deserialize the output of the reddit api.
 #[derive(Deserialize, Clone)]
