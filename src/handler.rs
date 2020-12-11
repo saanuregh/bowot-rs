@@ -42,7 +42,7 @@ impl EventHandler for Handler {
         if let Some(guild_id) = msg.guild_id {
             let data_read = ctx.data.read().await;
             let client = data_read.get::<MongoClient>().unwrap();
-            if let Ok(guild) = Guild::from_db(client, guild_id.0 as i64).await {
+            if let Ok(guild) = Guild::from_db(client, guild_id).await {
                 for trigger_phrase in guild.trigger_phrases {
                     let re =
                         Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
@@ -64,7 +64,7 @@ impl EventHandler for Handler {
     }
 
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
-        let guild_id = guild.id.0 as i64;
+        let guild_id = guild.id;
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
         let non_bot_members: Vec<UserId> = guild
@@ -84,7 +84,7 @@ impl EventHandler for Handler {
                     {
                         db_guild.members.push(t.clone())
                     } else {
-                        if let Err(e) = db_guild.add_member(id.0 as i64) {
+                        if let Err(e) = db_guild.add_member(*id) {
                             error!("{:?}", e);
                         }
                     }
@@ -95,7 +95,7 @@ impl EventHandler for Handler {
                 let p = get_env_or_default("PREFIX", "!");
                 let mut db_guild = Guild::new(guild_id, p);
                 non_bot_members.iter().for_each(|id| {
-                    if let Err(e) = db_guild.add_member(id.0 as i64) {
+                    if let Err(e) = db_guild.add_member(*id) {
                         error!("{:?}", e);
                     }
                 });
@@ -113,7 +113,7 @@ impl EventHandler for Handler {
         guild: GuildUnavailable,
         _full: Option<DiscordGuild>,
     ) {
-        let guild_id = guild.id.0 as i64;
+        let guild_id = guild.id;
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
         if let Ok(mut g) = Guild::from_db(client, guild_id).await {
@@ -134,8 +134,8 @@ impl EventHandler for Handler {
         }
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(mut g) = Guild::from_db(client, guild_id.0 as i64).await {
-            if let Ok(g) = g.add_member(new_member.user.id.0 as i64) {
+        if let Ok(mut g) = Guild::from_db(client, guild_id).await {
+            if let Ok(g) = g.add_member(new_member.user.id) {
                 match g.save_guild(client).await {
                     Ok(g) => {
                         if g.default_role != 0 {
@@ -162,8 +162,8 @@ impl EventHandler for Handler {
         }
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(mut _g) = Guild::from_db(client, guild_id.0 as i64).await {
-            if let Ok(g) = _g.remove_member(user.id.0 as i64) {
+        if let Ok(mut _g) = Guild::from_db(client, guild_id).await {
+            if let Ok(g) = _g.remove_member(user.id) {
                 if let Err(e) = g.save_guild(client).await {
                     error!("{:?}", e);
                 }
@@ -181,16 +181,16 @@ impl EventHandler for Handler {
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
         let mut change = false;
-        let role_id = removed_role_id.0 as i64;
-        if let Ok(mut guild) = Guild::from_db(client, guild_id.0 as i64).await {
-            if guild.default_role == role_id {
-                if let Err(e) = guild.change_default_role(0) {
+        let role_id = removed_role_id;
+        if let Ok(mut guild) = Guild::from_db(client, guild_id).await {
+            if RoleId(guild.default_role as u64) == role_id {
+                if let Err(e) = guild.change_default_role(RoleId(0)) {
                     error!("{:?}", e);
                     return;
                 }
                 change = true;
             }
-            if let Ok(_) = guild.self_roles.binary_search(&role_id) {
+            if let Ok(_) = guild.self_roles.binary_search(&(role_id.0 as i64)) {
                 if let Err(e) = guild.remove_self_role(role_id) {
                     error!("{:?}", e);
                     return;

@@ -212,7 +212,7 @@ async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
     if let Some(guild_id) = msg.guild_id {
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, guild_id.0 as i64).await {
+        if let Ok(guild) = Guild::from_db(client, guild_id).await {
             if guild.disabled_commands.contains(&cmd_name.to_string()) {
                 let _ = msg
                     .reply(
@@ -252,7 +252,7 @@ async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command
     if let Some(guild_id) = msg.guild_id {
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, guild_id.0 as i64).await {
+        if let Ok(guild) = Guild::from_db(client, guild_id).await {
             for c in guild.custom_commands.iter() {
                 if c.name == unrecognised_command_name {
                     let _ = msg.reply(ctx, &c.reply).await;
@@ -270,7 +270,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     let mut p = get_env_or_default("PREFIX", "!");
     if let Some(id) = &msg.guild_id {
         let client = data.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, id.0 as i64).await {
+        if let Ok(guild) = Guild::from_db(client, *id).await {
             p = guild.prefix;
         }
     }

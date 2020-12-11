@@ -1,6 +1,7 @@
 use futures::stream::StreamExt;
 use itconfig::*;
 use serde::{Deserialize, Serialize};
+use serenity::model::id::{GuildId, RoleId, UserId};
 use wither::bson::{doc, oid::ObjectId};
 use wither::mongodb::Client as Mongo;
 use wither::prelude::Model;
@@ -36,10 +37,10 @@ pub struct Guild {
 }
 
 impl Guild {
-    pub fn new(guild_id: i64, prefix: String) -> Self {
+    pub fn new(guild_id: GuildId, prefix: String) -> Self {
         Guild {
             id: None,
-            guild_id: guild_id,
+            guild_id: guild_id.0 as i64,
             self_roles: vec![],
             members: vec![],
             prefix: prefix,
@@ -55,9 +56,9 @@ impl Guild {
         }
     }
 
-    pub async fn from_db(client: &Mongo, guild_id: i64) -> Result<Self, &'static str> {
+    pub async fn from_db(client: &Mongo, guild_id: GuildId) -> Result<Self, &'static str> {
         let db = client.database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
-        if let Ok(_g) = Guild::find_one(&db, doc! {"guild_id": guild_id}, None).await {
+        if let Ok(_g) = Guild::find_one(&db, doc! {"guild_id": guild_id.0 as i64}, None).await {
             if let Some(g) = _g {
                 return Ok(g);
             }
@@ -81,17 +82,21 @@ impl Guild {
         Err("Db not found")
     }
 
-    pub fn add_member(&mut self, member_id: i64) -> Result<&mut Self, &str> {
-        if self.members.iter().any(|y| y.id == member_id) {
+    pub fn add_member(&mut self, member_id: UserId) -> Result<&mut Self, &str> {
+        if self
+            .members
+            .iter()
+            .any(|y| UserId(y.id as u64) == member_id)
+        {
             return Err("Member already exists");
         }
         self.members.push(Member::new(member_id));
         Ok(self)
     }
 
-    pub fn remove_member(&mut self, member_id: i64) -> Result<&mut Self, &str> {
+    pub fn remove_member(&mut self, member_id: UserId) -> Result<&mut Self, &str> {
         for (i, y) in self.members.iter().enumerate() {
-            if y.id == member_id {
+            if y.id == member_id.0 as i64 {
                 self.members.remove(i);
                 return Ok(self);
             }
@@ -99,18 +104,18 @@ impl Guild {
         Err("Member doesn't exist")
     }
 
-    pub fn add_self_role(&mut self, role_id: i64) -> Result<&mut Self, &str> {
-        match self.self_roles.binary_search(&role_id) {
+    pub fn add_self_role(&mut self, role_id: RoleId) -> Result<&mut Self, &str> {
+        match self.self_roles.binary_search(&(role_id.0 as i64)) {
             Ok(_) => Err("Self role already exists"),
             Err(_) => {
-                self.self_roles.push(role_id);
+                self.self_roles.push(role_id.0 as i64);
                 Ok(self)
             }
         }
     }
 
-    pub fn remove_self_role(&mut self, role_id: i64) -> Result<&mut Self, &str> {
-        match self.self_roles.binary_search(&role_id) {
+    pub fn remove_self_role(&mut self, role_id: RoleId) -> Result<&mut Self, &str> {
+        match self.self_roles.binary_search(&(role_id.0 as i64)) {
             Ok(i) => {
                 self.self_roles.remove(i);
                 Ok(self)
@@ -119,18 +124,18 @@ impl Guild {
         }
     }
 
-    pub fn add_hydrate(&mut self, user_id: i64) -> Result<&mut Self, &str> {
-        match self.hydrate.binary_search(&user_id) {
+    pub fn add_hydrate(&mut self, user_id: UserId) -> Result<&mut Self, &str> {
+        match self.hydrate.binary_search(&(user_id.0 as i64)) {
             Ok(_) => Err("Member already exists"),
             Err(_) => {
-                self.hydrate.push(user_id);
+                self.hydrate.push(user_id.0 as i64);
                 Ok(self)
             }
         }
     }
 
-    pub fn remove_hydrate(&mut self, user_id: i64) -> Result<&mut Self, &str> {
-        match self.hydrate.binary_search(&user_id) {
+    pub fn remove_hydrate(&mut self, user_id: UserId) -> Result<&mut Self, &str> {
+        match self.hydrate.binary_search(&(user_id.0 as i64)) {
             Ok(i) => {
                 self.hydrate.remove(i);
                 Ok(self)
@@ -207,14 +212,14 @@ impl Guild {
         Ok(self)
     }
 
-    pub fn change_default_role(&mut self, role_id: i64) -> Result<&mut Self, &str> {
-        self.default_role = role_id;
+    pub fn change_default_role(&mut self, role_id: RoleId) -> Result<&mut Self, &str> {
+        self.default_role = role_id.0 as i64;
         Ok(self)
     }
 
-    pub fn get_member(&self, member_id: i64) -> Result<Member, &str> {
+    pub fn get_member(&self, member_id: UserId) -> Result<Member, &str> {
         for m in self.members.clone() {
-            if m.id == member_id {
+            if m.id == member_id.0 as i64 {
                 return Ok(m);
             }
         }
@@ -240,10 +245,10 @@ pub struct Member {
 }
 
 impl Member {
-    pub fn new(member_id: i64) -> Self {
+    pub fn new(member_id: UserId) -> Self {
         Member {
             coins: 0,
-            id: member_id,
+            id: member_id.0 as i64,
             last_daily: 0,
         }
     }

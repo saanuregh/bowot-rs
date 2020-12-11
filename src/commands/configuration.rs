@@ -1,12 +1,6 @@
 use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, MongoClient};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
-use serenity::{
-    collector::MessageCollectorBuilder,
-    framework::standard::{macros::command, Args, CommandResult},
-    futures::stream::StreamExt,
-    model::channel::Message,
-    prelude::Context,
-};
+use serenity::{collector::MessageCollectorBuilder, model::id::RoleId, framework::standard::{macros::command, Args, CommandResult}, futures::stream::StreamExt, model::channel::Message, prelude::Context};
 use std::time::Duration;
 
 /// Configures the bot for the guild/server it was invoked on.
@@ -49,7 +43,7 @@ async fn guild(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
 #[min_args(1)]
 async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let prefix = args.message();
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     Guild::from_db(client, guild_id)
@@ -70,7 +64,7 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 /// Usage: `config guild default_role`
 #[command]
 async fn default_role(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let dguild = msg.guild(ctx).await.unwrap();
@@ -83,7 +77,7 @@ async fn default_role(ctx: &Context, msg: &Message) -> CommandResult {
     ]);
     for (role_id, role) in dguild.roles.clone() {
         if !role.name.starts_with("@") {
-            let _role = role_id.0 as u64;
+            let _role = role_id.0 as i64;
             table.add_row(vec![
                 Cell::new(_role).set_alignment(Center),
                 Cell::new(role.name).set_alignment(Center),
@@ -109,12 +103,12 @@ async fn default_role(ctx: &Context, msg: &Message) -> CommandResult {
         .collect::<Vec<_>>()
         .await;
     if collected_msg.len() == 1 {
-        let reply_role_id = collected_msg[0].content.parse::<u64>()?;
+        let reply_role_id = RoleId(collected_msg[0].content.parse::<u64>()?);
         for (role_id, role) in dguild.roles {
-            if reply_role_id == role_id.0 as u64 {
+            if reply_role_id == role_id {
                 Guild::from_db(client, guild_id)
                     .await?
-                    .change_default_role(reply_role_id as i64)?
+                    .change_default_role(reply_role_id)?
                     .save_guild(client)
                     .await?;
                 msg.reply(
@@ -159,7 +153,7 @@ fn _command_exist(command_name: String) -> bool {
 #[command]
 #[min_args(2)]
 async fn add_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let cmd = args.single::<String>()?;
     if _command_exist(cmd.clone()) {
         msg.reply(ctx, format!("Command already exist `{}`", cmd.clone()))
@@ -186,7 +180,7 @@ async fn add_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> Com
 #[command]
 #[min_args(1)]
 async fn remove_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let cmd = args.single::<String>()?;
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
@@ -210,7 +204,7 @@ async fn remove_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> 
 #[command]
 #[min_args(2)]
 async fn add_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let phrase = args.single::<String>()?;
     let reply = args.rest();
     let mut emote = ' ';
@@ -253,7 +247,7 @@ async fn add_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> Com
 #[command]
 #[min_args(1)]
 async fn remove_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let phrase = args.single::<String>()?;
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
@@ -280,7 +274,7 @@ async fn disable_command(ctx: &Context, msg: &Message, mut args: Args) -> Comman
     if _command_exist(command_name.clone()) {
         let data = ctx.data.read().await;
         let client = data.get::<MongoClient>().unwrap();
-        Guild::from_db(client, msg.guild_id.unwrap().0 as i64)
+        Guild::from_db(client, msg.guild_id.unwrap())
             .await?
             .add_disabled_command(command_name.clone())?
             .save_guild(client)
@@ -307,7 +301,7 @@ async fn enable_command(ctx: &Context, msg: &Message, mut args: Args) -> Command
     if _command_exist(command_name.clone()) {
         let data = ctx.data.read().await;
         let client = data.get::<MongoClient>().unwrap();
-        Guild::from_db(client, msg.guild_id.unwrap().0 as i64)
+        Guild::from_db(client, msg.guild_id.unwrap())
             .await?
             .remove_disabled_command(command_name.clone())?
             .save_guild(client)
@@ -331,7 +325,7 @@ async fn enable_command(ctx: &Context, msg: &Message, mut args: Args) -> Command
 #[checks(bot_has_manage_roles)]
 #[min_args(1)]
 async fn add_self_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let role_name = args.single::<String>()?;
     let role = msg
         .guild_id
@@ -344,7 +338,7 @@ async fn add_self_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
     let client = data.get::<MongoClient>().unwrap();
     Guild::from_db(client, guild_id)
         .await?
-        .add_self_role(role.id.0 as i64)?
+        .add_self_role(role.id)?
         .save_guild(client)
         .await?;
     msg.reply(ctx, format!("Successfully added self role `{}`", role_name))
@@ -359,7 +353,7 @@ async fn add_self_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
 #[command]
 #[checks(bot_has_manage_roles)]
 async fn remove_self_role(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let mut guild = Guild::from_db(client, guild_id).await?;
@@ -403,9 +397,9 @@ async fn remove_self_role(ctx: &Context, msg: &Message) -> CommandResult {
         .collect::<Vec<_>>()
         .await;
     if collected_msg.len() == 1 {
-        let reply_role_id = collected_msg[0].content.parse::<i64>()?;
+        let reply_role_id = RoleId(collected_msg[0].content.parse::<u64>()?);
         for (role_id, role) in dguild.roles.clone() {
-            if reply_role_id == role_id.0 as i64 {
+            if reply_role_id == role_id {
                 dguild.delete_role(ctx, role_id).await?;
                 guild
                     .remove_self_role(reply_role_id)?
@@ -453,7 +447,7 @@ async fn user(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
 #[command]
 #[checks(bot_has_manage_roles)]
 async fn add_role(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let guild = Guild::from_db(client, guild_id).await?;
@@ -497,9 +491,9 @@ async fn add_role(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         .collect::<Vec<_>>()
         .await;
     if collected_msg.len() == 1 {
-        let reply_role_id = collected_msg[0].content.parse::<i64>()?;
+        let reply_role_id = RoleId(collected_msg[0].content.parse::<u64>()?);
         for (role_id, role) in dguild.roles.clone() {
-            if reply_role_id == role_id.0 as i64 {
+            if reply_role_id == role_id {
                 let mut member = msg.member(ctx).await.unwrap();
                 member.add_role(ctx, role_id).await?;
                 msg.reply(ctx, format!("Successfully added self role `{}`", role.name))
@@ -529,7 +523,7 @@ async fn add_role(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 #[command]
 #[checks(bot_has_manage_roles)]
 async fn remove_role(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let guild = Guild::from_db(client, guild_id).await?;
@@ -570,9 +564,9 @@ async fn remove_role(ctx: &Context, msg: &Message) -> CommandResult {
         .collect::<Vec<_>>()
         .await;
     if collected_msg.len() == 1 {
-        let reply_role_id = collected_msg[0].content.parse::<i64>()?;
+        let reply_role_id = RoleId(collected_msg[0].content.parse::<u64>()?);
         for role_id in member.roles.clone() {
-            if reply_role_id == role_id.0 as i64 {
+            if reply_role_id == role_id {
                 let role = role_id.to_role_cached(ctx).await.unwrap();
                 member.remove_role(ctx, role_id).await?;
                 msg.reply(

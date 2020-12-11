@@ -777,7 +777,7 @@ async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
 /// Get all custom commands in this guild.
 #[command]
 async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let cmds = Guild::from_db(client, guild_id).await?.custom_commands;
@@ -808,7 +808,7 @@ async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
 /// Get all self roles in this guild.
 #[command]
 async fn self_roles(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let self_roles = Guild::from_db(client, guild_id).await?.self_roles;

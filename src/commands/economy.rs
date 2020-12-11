@@ -13,8 +13,8 @@ use std::time::Duration;
 /// Check your current cowoins balance.
 #[command]
 async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
-    let member_id = msg.author.id.0 as i64;
+    let guild_id = msg.guild_id.unwrap();
+    let member_id = msg.author.id;
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let guild = Guild::from_db(client, guild_id).await?;
@@ -30,8 +30,8 @@ async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[num_args(1)]
 async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
-    let member_id = msg.author.id.0 as i64;
+    let guild_id = msg.guild_id.unwrap();
+    let member_id = msg.author.id;
 
     let mut coins = args.single::<i64>()?;
     if coins < 1 {
@@ -89,8 +89,8 @@ async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
     let daily_const = 1000;
-    let guild_id = msg.guild_id.unwrap().0 as i64;
-    let member_id = msg.author.id.0 as i64;
+    let guild_id = msg.guild_id.unwrap();
+    let member_id = msg.author.id;
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let mut guild = Guild::from_db(client, guild_id).await?;
@@ -128,7 +128,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
 /// Cowoins leaderboard.
 #[command]
 async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap().0 as i64;
+    let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
     let client = data.get::<MongoClient>().unwrap();
     let mut members = Guild::from_db(client, guild_id).await?.members;
@@ -144,7 +144,7 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
     for (i, member) in members.clone().iter().enumerate() {
         let _member = ctx
             .http
-            .get_member(guild_id as u64, member.id as u64)
+            .get_member(*guild_id.as_u64(), member.id as u64)
             .await?;
         table.add_row(vec![
             Cell::new(i + 1).set_alignment(Center),
