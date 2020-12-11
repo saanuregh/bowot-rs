@@ -17,7 +17,10 @@ use tracing_subscriber::FmtSubscriber;
 
 use itconfig::*;
 use serenity::{
-    client::{bridge::gateway::ShardManager, Client},
+    client::{
+        bridge::gateway::{GatewayIntents, ShardManager},
+        Client,
+    },
     http::Http,
     prelude::TypeMapKey,
 };
@@ -76,6 +79,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut client = Client::builder(&bot_token)
         .event_handler(Handler)
         .framework(std_framework)
+        .intents({
+            let mut intents = GatewayIntents::all();
+            intents.remove(GatewayIntents::DIRECT_MESSAGE_TYPING);
+            intents.remove(GatewayIntents::GUILD_MESSAGE_TYPING);
+            intents
+        })
         .register_songbird()
         .await?;
 

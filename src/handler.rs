@@ -7,6 +7,7 @@ use serenity::{
         channel::Message,
         gateway::Ready,
         guild::{Guild as DiscordGuild, GuildUnavailable, Member as DiscordMember, Role},
+        id::UserId,
         id::{GuildId, RoleId},
         user::User,
     },
@@ -66,19 +67,43 @@ impl EventHandler for Handler {
         let guild_id = guild.id.0 as i64;
         let data_read = ctx.data.read().await;
         let client = data_read.get::<MongoClient>().unwrap();
-        if let Err(_) = Guild::from_db(client, guild_id).await {
-            let p = get_env_or_default("PREFIX", "!");
-            let mut _guild = Guild::new(guild_id, p);
-            guild.members.iter().for_each(|(id, m)| {
-                if !m.user.bot {
-                    if let Err(e) = _guild.add_member(id.0 as i64) {
+        let non_bot_members: Vec<UserId> = guild
+            .members
+            .into_iter()
+            .filter(|(_id, m)| !m.user.bot)
+            .map(|(id, _m)| id)
+            .collect();
+        let mut db_guild = match Guild::from_db(client, guild_id).await {
+            Ok(mut db_guild) => {
+                let old_db_members = db_guild.members.clone();
+                db_guild.members = Vec::new();
+                non_bot_members.iter().for_each(|id| {
+                    if let Some(t) = old_db_members
+                        .iter()
+                        .find(|old_db_member| old_db_member.id == id.0 as i64)
+                    {
+                        db_guild.members.push(t.clone())
+                    } else {
+                        if let Err(e) = db_guild.add_member(id.0 as i64) {
+                            error!("{:?}", e);
+                        }
+                    }
+                });
+                db_guild
+            }
+            Err(_) => {
+                let p = get_env_or_default("PREFIX", "!");
+                let mut db_guild = Guild::new(guild_id, p);
+                non_bot_members.iter().for_each(|id| {
+                    if let Err(e) = db_guild.add_member(id.0 as i64) {
                         error!("{:?}", e);
                     }
-                }
-            });
-            if let Err(e) = _guild.save_guild(client).await {
-                error!("{:?}", e);
+                });
+                db_guild
             }
+        };
+        if let Err(e) = db_guild.save_guild(client).await {
+            error!("{:?}", e);
         }
     }
 
