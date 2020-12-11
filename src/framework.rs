@@ -179,14 +179,14 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
                     )
                 }
             };
-            let _ = msg.channel_id.say(ctx, s).await;
+            let _ = msg.reply(ctx, s).await;
         }
         // DispatchError::IgnoredBot {} => {
         //     return;
         // }
         DispatchError::CheckFailed(_, reason) => {
             if let Reason::User(r) = reason {
-                let _ = msg.channel_id.say(ctx, r).await;
+                let _ = msg.reply(ctx, r).await;
             }
         }
         DispatchError::Ratelimited(x) => {
@@ -236,7 +236,7 @@ async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResul
     if let Err(why) = &error {
         error!("Error while running command {}", &cmd_name);
         error!("{:?}", &error);
-        if let Err(_) = msg.channel_id.say(ctx, why).await {
+        if let Err(_) = msg.reply(ctx, why).await {
             error!(
                 "Unable to send messages on channel id {}",
                 &msg.channel_id.0

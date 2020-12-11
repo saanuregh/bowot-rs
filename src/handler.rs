@@ -47,7 +47,7 @@ impl EventHandler for Handler {
                     let re =
                         Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
                     if re.is_match(&msg.content) {
-                        if let Ok(_) = msg.channel_id.say(&ctx, &trigger_phrase.reply).await {
+                        if let Ok(_) = msg.reply(&ctx, &trigger_phrase.reply).await {
                             if !trigger_phrase.emote.is_whitespace() {
                                 let _ = msg.react(&ctx, trigger_phrase.emote).await;
                             }
