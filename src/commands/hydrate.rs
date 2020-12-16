@@ -1,21 +1,9 @@
 use crate::{database::Guild, Database};
 use serenity::{
-    framework::standard::{macros::command, Args, CommandResult},
+    framework::standard::{macros::command, CommandResult},
     model::channel::Message,
     prelude::Context,
 };
-
-/// Add/Remove yourself to/from hydrate reminder.
-///
-/// Configurable aspects:
-/// `add`: Add yourself to hydrate reminder.
-/// `remove`: Remove yourself from hydrate reminder.
-#[command]
-#[only_in("guilds")]
-#[sub_commands(add_hydrate, remove_hydrate)]
-async fn hydrate(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
-    Ok(())
-}
 
 /// Add yourself to hydrate reminder.
 #[command("add")]

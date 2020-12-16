@@ -95,8 +95,13 @@ struct Reddit;
 
 // The Hydrate command group.
 #[group("Hydrate")]
-#[description = "All the hydrate reminder related commands."]
-#[commands(hydrate)]
+#[description = "Add/Remove yourself to/from hydrate reminder.
+
+ Configurable aspects:
+ `add`: Add yourself to hydrate reminder.
+ `remove`: Remove yourself from hydrate reminder."]
+#[prefixes("hydrate")]
+#[commands(add_hydrate, remove_hydrate)]
 struct Hydrate;
 
 // The music command group.
@@ -230,18 +235,32 @@ async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
 }
 
 // This function executes every time a command finishes executing.
-// It's used here to handle errors that happen in the middle of the command.
 #[hook]
 async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResult) {
-    if let Err(why) = &error {
-        error!("Error while running command {}", &cmd_name);
-        error!("{:?}", &error);
-        if let Err(_) = msg.reply(ctx, why).await {
-            error!(
-                "Unable to send messages on channel id {}",
-                &msg.channel_id.0
-            );
-        };
+    match &error {
+        Ok(_) => {
+            if cmd_name != "help" {
+                let data = ctx.data.read().await;
+                let db = data.get::<Database>().unwrap();
+                let mut stat = CommandStat::from_db(db, cmd_name.to_string())
+                    .await
+                    .unwrap_or(CommandStat::new(cmd_name.to_string()));
+                stat.increment_count();
+                if let Err(why) = stat.save_stat(db).await {
+                    error!(why)
+                }
+            }
+        }
+        Err(why) => {
+            error!("Error while running command {}", &cmd_name);
+            error!("{:?}", &error);
+            if let Err(_) = msg.reply(ctx, why).await {
+                error!(
+                    "Unable to send messages on channel id {}",
+                    &msg.channel_id.0
+                );
+            };
+        }
     }
 }
 

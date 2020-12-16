@@ -292,3 +292,55 @@ impl TriggerPhrase {
         }
     }
 }
+
+#[derive(Debug, Model, Serialize, Deserialize)]
+#[model(index(keys = r#"doc!{"cmd_name": 1}"#, options = r#"doc!{"unique": true}"#))]
+pub struct CommandStat {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub cmd_name: String,
+    pub count: i64,
+}
+
+impl CommandStat {
+    pub fn new(cmd_name: String) -> Self {
+        CommandStat {
+            id: None,
+            cmd_name,
+            count: 0,
+        }
+    }
+
+    pub async fn from_db(db: &Database, cmd_name: String) -> Result<Self, &'static str> {
+        if let Ok(_g) = CommandStat::find_one(&db, doc! {"cmd_name": cmd_name}, None).await {
+            if let Some(g) = _g {
+                return Ok(g);
+            }
+        }
+        Err("Db not found")
+    }
+
+    pub async fn save_stat(&mut self, db: &Database) -> Result<&mut Self, &str> {
+        if let Ok(_) = self.save(&db, None).await {
+            return Ok(self);
+        };
+        Err("Db not found")
+    }
+
+    pub fn increment_count(&mut self) {
+        self.count += 1;
+    }
+}
+
+pub async fn get_all_cmd_stats(db: &Database) -> Result<Vec<CommandStat>, &str> {
+    if let Ok(mut cursor) = CommandStat::find(&db, None, None).await {
+        let mut commands: Vec<CommandStat> = Vec::new();
+        while let Some(res) = cursor.next().await {
+            if let Ok(cmd) = res {
+                commands.push(cmd);
+            }
+        }
+        return Ok(commands);
+    }
+    Err("Db not found")
+}
