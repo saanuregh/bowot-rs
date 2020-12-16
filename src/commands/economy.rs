@@ -73,10 +73,7 @@ async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             return Ok(());
         }
     };
-    guild
-        .update_member(member.clone())?
-        .save_guild(db)
-        .await?;
+    guild.update_member(member.clone())?.save_guild(db).await?;
     msg.reply(
         ctx,
         format!("{}\nYou have {} cowoins now", response, member.coins),
@@ -100,10 +97,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
         member
             .update_coins(daily_const)
             .update_last_daily(Utc::now().timestamp());
-        guild
-            .update_member(member.clone())?
-            .save_guild(db)
-            .await?;
+        guild.update_member(member.clone())?.save_guild(db).await?;
         msg.reply(
             ctx,
             format!(
