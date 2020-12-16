@@ -10,14 +10,14 @@ use serenity::{
 };
 use std::collections::HashSet;
 use std::{sync::Arc, time::Duration};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
     let data = ctx.data.read().await;
     let mongo_client = data.get::<Database>().unwrap();
+    let mut users: HashSet<i64> = HashSet::new();
     if let Ok(guilds) = get_all_guilds(mongo_client).await {
-        let mut users: HashSet<i64> = HashSet::new();
         for g in guilds {
             for u in g.hydrate {
                 users.insert(u);
@@ -35,8 +35,6 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
                                     _u.dm(&ctx.http, |m| m.content(random_msg)).await
                                 {
                                     error!("Unhandled dispatch error: {:?}", error);
-                                } else {
-                                    info!("Successfully send to user: {:?}", user_id);
                                 }
                             }
                         }
@@ -46,7 +44,10 @@ async fn hydrate_reminder(ctx: Arc<Context>) {
             }
         }
     }
-    debug!("Hydrate reminder done");
+    info!(
+        "Hydrate reminder done, successfully send reminders to {} users",
+        users.len()
+    );
 }
 
 async fn status_update(ctx: Arc<Context>) {
@@ -59,7 +60,7 @@ async fn status_update(ctx: Arc<Context>) {
     };
     ctx.set_presence(Some(activity(random_status[1])), OnlineStatus::Online)
         .await;
-    debug!("Status update done");
+    info!("Status update done");
 }
 
 pub async fn service_loop(ctx: Arc<Context>) {
