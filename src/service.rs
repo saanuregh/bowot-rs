@@ -1,7 +1,7 @@
 use crate::{
     database::get_all_guilds,
     lang::{HYDRATE, STATUSES},
-    MongoClient,
+    Database,
 };
 use rand::seq::SliceRandom;
 use serenity::{
@@ -15,7 +15,7 @@ use tracing::{debug, error, info};
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
     let data = ctx.data.read().await;
-    let mongo_client = data.get::<MongoClient>().unwrap();
+    let mongo_client = data.get::<Database>().unwrap();
     if let Ok(guilds) = get_all_guilds(mongo_client).await {
         let mut users: HashSet<i64> = HashSet::new();
         for g in guilds {

@@ -4,7 +4,7 @@ use crate::{
         music::*, reddit::*, roleplay::*,
     },
     database::*,
-    MongoClient,
+    Database,
 };
 
 use itconfig::*;
@@ -210,9 +210,9 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
 #[hook]
 async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
     if let Some(guild_id) = msg.guild_id {
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, guild_id).await {
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
+        if let Ok(guild) = Guild::from_db(db, guild_id).await {
             if guild.disabled_commands.contains(&cmd_name.to_string()) {
                 let _ = msg
                     .reply(
@@ -250,9 +250,9 @@ async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResul
 #[hook]
 async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command_name: &str) {
     if let Some(guild_id) = msg.guild_id {
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, guild_id).await {
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
+        if let Ok(guild) = Guild::from_db(db, guild_id).await {
             for c in guild.custom_commands.iter() {
                 if c.name == unrecognised_command_name {
                     let _ = msg.reply(ctx, &c.reply).await;
@@ -269,8 +269,8 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     let data = ctx.data.read().await;
     let mut p = get_env_or_default("PREFIX", "!");
     if let Some(id) = &msg.guild_id {
-        let client = data.get::<MongoClient>().unwrap();
-        if let Ok(guild) = Guild::from_db(client, *id).await {
+        let db = data.get::<Database>().unwrap();
+        if let Ok(guild) = Guild::from_db(db, *id).await {
             p = guild.prefix;
         }
     }

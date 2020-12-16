@@ -1,4 +1,4 @@
-use crate::{database::Guild, MongoClient};
+use crate::{database::Guild, Database};
 use chrono::prelude::*;
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use rand::distributions::WeightedIndex;
@@ -16,8 +16,8 @@ async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let guild = Guild::from_db(db, guild_id).await?;
     let member = guild.get_member(member_id)?;
     msg.reply(ctx, format!("You have {} cowoins", member.coins))
         .await?;
@@ -40,8 +40,8 @@ async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let mut guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let mut guild = Guild::from_db(db, guild_id).await?;
     let mut member = guild.get_member(member_id)?;
 
     if coins > member.coins {
@@ -75,7 +75,7 @@ async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
     guild
         .update_member(member.clone())?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(
         ctx,
@@ -92,8 +92,8 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let mut guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let mut guild = Guild::from_db(db, guild_id).await?;
     let mut member = guild.get_member(member_id)?;
     let difference = Utc::now().timestamp() - member.last_daily;
     if difference > 86400 {
@@ -102,7 +102,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
             .update_last_daily(Utc::now().timestamp());
         guild
             .update_member(member.clone())?
-            .save_guild(client)
+            .save_guild(db)
             .await?;
         msg.reply(
             ctx,
@@ -130,8 +130,8 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
 async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let mut members = Guild::from_db(client, guild_id).await?.members;
+    let db = data.get::<Database>().unwrap();
+    let mut members = Guild::from_db(db, guild_id).await?.members;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
     table.set_content_arrangement(Dynamic).set_table_width(100);

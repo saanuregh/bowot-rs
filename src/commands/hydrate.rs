@@ -1,4 +1,4 @@
-use crate::{database::Guild, MongoClient};
+use crate::{database::Guild, Database};
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     model::channel::Message,
@@ -22,11 +22,11 @@ async fn hydrate(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
 async fn add_hydrate(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .add_hydrate(msg.author.id)?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(ctx, "You are offically part of hydration now")
         .await?;
@@ -38,11 +38,11 @@ async fn add_hydrate(ctx: &Context, msg: &Message) -> CommandResult {
 async fn remove_hydrate(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .remove_hydrate(msg.author.id)?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(ctx, "Hope to see you in hydration again, Bye!")
         .await?;

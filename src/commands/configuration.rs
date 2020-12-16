@@ -1,4 +1,4 @@
-use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, MongoClient};
+use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, Database};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use serenity::{
     collector::MessageCollectorBuilder,
@@ -52,11 +52,11 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let prefix = args.message();
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .change_prefix(prefix.to_string())?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(
         ctx,
@@ -73,7 +73,7 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 async fn default_role(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
+    let db = data.get::<Database>().unwrap();
     let dguild = msg.guild(ctx).await.unwrap();
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
@@ -113,10 +113,10 @@ async fn default_role(ctx: &Context, msg: &Message) -> CommandResult {
         let reply_role_id = RoleId(collected_msg[0].content.parse::<u64>()?);
         for (role_id, role) in dguild.roles {
             if reply_role_id == role_id {
-                Guild::from_db(client, guild_id)
+                Guild::from_db(db, guild_id)
                     .await?
                     .change_default_role(reply_role_id)?
-                    .save_guild(client)
+                    .save_guild(db)
                     .await?;
                 msg.reply(
                     ctx,
@@ -169,11 +169,11 @@ async fn add_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> Com
     }
     let reply = args.rest();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .add_custom_command(cmd.clone(), reply.to_string())?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(ctx, format!("Successfully added custom command `{}`", cmd))
         .await?;
@@ -190,11 +190,11 @@ async fn remove_custom_command(ctx: &Context, msg: &Message, mut args: Args) -> 
     let guild_id = msg.guild_id.unwrap();
     let cmd = args.single::<String>()?;
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .remove_custom_command(cmd.clone())?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(
         ctx,
@@ -233,11 +233,11 @@ async fn add_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> Com
         }
     }
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .add_trigger_phrase(phrase.clone(), reply.to_string(), emote)?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(
         ctx,
@@ -257,11 +257,11 @@ async fn remove_trigger_phrase(ctx: &Context, msg: &Message, mut args: Args) -> 
     let guild_id = msg.guild_id.unwrap();
     let phrase = args.single::<String>()?;
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .remove_trigger_phrase(phrase.clone())?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(
         ctx,
@@ -280,11 +280,11 @@ async fn disable_command(ctx: &Context, msg: &Message, mut args: Args) -> Comman
     let command_name = args.single_quoted::<String>()?;
     if _command_exist(command_name.clone()) {
         let data = ctx.data.read().await;
-        let client = data.get::<MongoClient>().unwrap();
-        Guild::from_db(client, msg.guild_id.unwrap())
+        let db = data.get::<Database>().unwrap();
+        Guild::from_db(db, msg.guild_id.unwrap())
             .await?
             .add_disabled_command(command_name.clone())?
-            .save_guild(client)
+            .save_guild(db)
             .await?;
         msg.reply(
             ctx,
@@ -307,11 +307,11 @@ async fn enable_command(ctx: &Context, msg: &Message, mut args: Args) -> Command
     let command_name = args.single_quoted::<String>()?;
     if _command_exist(command_name.clone()) {
         let data = ctx.data.read().await;
-        let client = data.get::<MongoClient>().unwrap();
-        Guild::from_db(client, msg.guild_id.unwrap())
+        let db = data.get::<Database>().unwrap();
+        Guild::from_db(db, msg.guild_id.unwrap())
             .await?
             .remove_disabled_command(command_name.clone())?
-            .save_guild(client)
+            .save_guild(db)
             .await?;
         msg.reply(
             ctx,
@@ -342,11 +342,11 @@ async fn add_self_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
         })
         .await?;
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    Guild::from_db(client, guild_id)
+    let db = data.get::<Database>().unwrap();
+    Guild::from_db(db, guild_id)
         .await?
         .add_self_role(role.id)?
-        .save_guild(client)
+        .save_guild(db)
         .await?;
     msg.reply(ctx, format!("Successfully added self role `{}`", role_name))
         .await?;
@@ -362,8 +362,8 @@ async fn add_self_role(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
 async fn remove_self_role(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let mut guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let mut guild = Guild::from_db(db, guild_id).await?;
     if guild.self_roles.is_empty() {
         msg.reply(ctx, "There are no self roles").await?;
         return Ok(());
@@ -410,7 +410,7 @@ async fn remove_self_role(ctx: &Context, msg: &Message) -> CommandResult {
                 dguild.delete_role(ctx, role_id).await?;
                 guild
                     .remove_self_role(reply_role_id)?
-                    .save_guild(client)
+                    .save_guild(db)
                     .await?;
                 msg.reply(
                     ctx,
@@ -456,8 +456,8 @@ async fn user(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
 async fn add_role(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let guild = Guild::from_db(db, guild_id).await?;
     if guild.self_roles.is_empty() {
         msg.reply(ctx, "There are no self roles").await?;
         return Ok(());
@@ -532,8 +532,8 @@ async fn add_role(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 async fn remove_role(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let guild = Guild::from_db(client, guild_id).await?;
+    let db = data.get::<Database>().unwrap();
+    let guild = Guild::from_db(db, guild_id).await?;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
     table.set_content_arrangement(Dynamic).set_table_width(100);

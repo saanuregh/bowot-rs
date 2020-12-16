@@ -21,20 +21,20 @@ use serenity::{
     http::Http,
     prelude::TypeMapKey,
 };
-use wither::mongodb::Client as Mongo;
+use wither::mongodb::{Client as MongoClient, Database as MongoDatabase};
 
 use songbird::SerenityInit;
 
 struct ShardManagerContainer; // Shard manager to use for the latency.
-struct MongoClient; // The connection to the mongo database.
+struct Database; // The connection to the mongo database.
 struct Uptime; //  This is for the startup time of the bot.
 
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
 
-impl TypeMapKey for MongoClient {
-    type Value = Mongo;
+impl TypeMapKey for Database {
+    type Value = MongoDatabase;
 }
 
 impl TypeMapKey for Uptime {
@@ -94,8 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Add the database connection to the data.
         {
             let mongo_uri = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
-            let mongo_client = Mongo::with_uri_str(&mongo_uri).await?;
-            data.insert::<MongoClient>(mongo_client.clone());
+            let mongo_database = MongoClient::with_uri_str(&mongo_uri)
+                .await?
+                .database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
+            data.insert::<Database>(mongo_database.clone());
             info!("Database initialized");
         }
 

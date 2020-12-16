@@ -1,4 +1,4 @@
-use crate::{database::Guild, service::service_loop, MongoClient};
+use crate::{database::Guild, service::service_loop, Database};
 use itconfig::*;
 use regex::Regex;
 use serenity::{
@@ -40,9 +40,9 @@ impl EventHandler for Handler {
 
         // Trigger phrase detection and handling.
         if let Some(guild_id) = msg.guild_id {
-            let data_read = ctx.data.read().await;
-            let client = data_read.get::<MongoClient>().unwrap();
-            if let Ok(guild) = Guild::from_db(client, guild_id).await {
+            let data = ctx.data.read().await;
+            let db = data.get::<Database>().unwrap();
+            if let Ok(guild) = Guild::from_db(db, guild_id).await {
                 for trigger_phrase in guild.trigger_phrases {
                     let re =
                         Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
@@ -65,15 +65,15 @@ impl EventHandler for Handler {
 
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
         let guild_id = guild.id;
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
         let non_bot_members: Vec<UserId> = guild
             .members
             .into_iter()
             .filter(|(_id, m)| !m.user.bot)
             .map(|(id, _m)| id)
             .collect();
-        let mut db_guild = match Guild::from_db(client, guild_id).await {
+        let mut db_guild = match Guild::from_db(db, guild_id).await {
             Ok(mut db_guild) => {
                 let old_db_members = db_guild.members.clone();
                 db_guild.members = Vec::new();
@@ -102,7 +102,7 @@ impl EventHandler for Handler {
                 db_guild
             }
         };
-        if let Err(e) = db_guild.save_guild(client).await {
+        if let Err(e) = db_guild.save_guild(db).await {
             error!("{:?}", e);
         }
     }
@@ -114,10 +114,10 @@ impl EventHandler for Handler {
         _full: Option<DiscordGuild>,
     ) {
         let guild_id = guild.id;
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(mut g) = Guild::from_db(client, guild_id).await {
-            if let Err(e) = g.delete_guild(client).await {
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
+        if let Ok(mut g) = Guild::from_db(db, guild_id).await {
+            if let Err(e) = g.delete_guild(db).await {
                 error!("{:?}", e);
             }
         }
@@ -132,11 +132,11 @@ impl EventHandler for Handler {
         if new_member.user.bot {
             return;
         }
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(mut g) = Guild::from_db(client, guild_id).await {
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
+        if let Ok(mut g) = Guild::from_db(db, guild_id).await {
             if let Ok(g) = g.add_member(new_member.user.id) {
-                match g.save_guild(client).await {
+                match g.save_guild(db).await {
                     Ok(g) => {
                         if g.default_role != 0 {
                             let _ = new_member
@@ -160,11 +160,11 @@ impl EventHandler for Handler {
         if user.bot {
             return;
         }
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
-        if let Ok(mut _g) = Guild::from_db(client, guild_id).await {
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
+        if let Ok(mut _g) = Guild::from_db(db, guild_id).await {
             if let Ok(g) = _g.remove_member(user.id) {
-                if let Err(e) = g.save_guild(client).await {
+                if let Err(e) = g.save_guild(db).await {
                     error!("{:?}", e);
                 }
             }
@@ -178,11 +178,11 @@ impl EventHandler for Handler {
         removed_role_id: RoleId,
         _removed_role_data_if_available: Option<Role>,
     ) {
-        let data_read = ctx.data.read().await;
-        let client = data_read.get::<MongoClient>().unwrap();
+        let data = ctx.data.read().await;
+        let db = data.get::<Database>().unwrap();
         let mut change = false;
         let role_id = removed_role_id;
-        if let Ok(mut guild) = Guild::from_db(client, guild_id).await {
+        if let Ok(mut guild) = Guild::from_db(db, guild_id).await {
             if RoleId(guild.default_role as u64) == role_id {
                 if let Err(e) = guild.change_default_role(RoleId(0)) {
                     error!("{:?}", e);
@@ -198,7 +198,7 @@ impl EventHandler for Handler {
                 change = true;
             }
             if change {
-                if let Err(e) = guild.save_guild(client).await {
+                if let Err(e) = guild.save_guild(db).await {
                     error!("{:?}", e);
                 }
             }

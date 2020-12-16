@@ -1,7 +1,7 @@
 use crate::{
     database::Guild,
     utils::{apis::*, basic_functions::*},
-    MongoClient,
+    Database,
 };
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use fasteval::error::Error;
@@ -767,8 +767,8 @@ async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
 async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let cmds = Guild::from_db(client, guild_id).await?.custom_commands;
+    let db = data.get::<Database>().unwrap();
+    let cmds = Guild::from_db(db, guild_id).await?.custom_commands;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
     table.set_content_arrangement(Dynamic).set_table_width(100);
@@ -799,8 +799,8 @@ async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
 async fn self_roles(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let client = data.get::<MongoClient>().unwrap();
-    let self_roles = Guild::from_db(client, guild_id).await?.self_roles;
+    let db = data.get::<Database>().unwrap();
+    let self_roles = Guild::from_db(db, guild_id).await?.self_roles;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
     table.set_content_arrangement(Dynamic).set_table_width(100);
