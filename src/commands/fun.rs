@@ -11,11 +11,12 @@ use reqwest::Url;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
     futures::stream::StreamExt,
+    http::AttachmentType,
     model::{channel::Message, id::UserId, misc::Mentionable},
     prelude::Context,
     utils::Colour,
 };
-use std::{collections::HashMap, time::Duration};
+use std::{borrow::Cow, collections::HashMap, time::Duration};
 
 /// Sends a qr code of the term mentioned.
 ///
@@ -1007,5 +1008,34 @@ async fn respect(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .react(&ctx, '🇫')
         .await?;
     msg.delete(&ctx).await?;
+    Ok(())
+}
+
+/// Generate triggered gif using avatar
+///
+/// Usage:
+/// `triggered`
+/// `triggered <@user>`
+#[command]
+async fn triggered(ctx: &Context, msg: &Message) -> CommandResult {
+    let user = match msg.mentions.is_empty() {
+        true => &msg.author,
+        false => &msg.mentions[0],
+    };
+    let image = generate_triggered_avatar(
+        user.static_avatar_url()
+            .unwrap_or(user.default_avatar_url())
+            .replace(".webp?size=1024", ".png"),
+    )
+    .await?;
+    msg.channel_id
+        .send_message(ctx, |m| {
+            m.reference_message(msg);
+            m.add_file(AttachmentType::Bytes {
+                data: Cow::from(image),
+                filename: "triggered.gif".to_string(),
+            })
+        })
+        .await?;
     Ok(())
 }

@@ -56,7 +56,8 @@ struct Meta;
     valorant,
     ship,
     pp,
-    respect
+    respect,
+    triggered
 )]
 struct Fun;
 

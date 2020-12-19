@@ -1,9 +1,17 @@
+use lazy_static::lazy_static;
+use rand::{seq::SliceRandom, thread_rng, Rng};
+use regex::Regex;
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, error::Error, str::FromStr};
 
 pub type ApiError = Box<dyn Error + Send + Sync>;
+
+lazy_static! {
+    static ref CLIENT: Client = Client::builder().gzip(true).brotli(true).build().unwrap();
+    static ref IMAGE_EXT_RE: Regex = Regex::new(r"^.*(png|gif|jpeg|jpg)$").unwrap();
+}
 
 #[derive(Clone, Deserialize)]
 pub struct ValorantStatus {
@@ -37,7 +45,7 @@ pub struct Update {
 }
 
 pub async fn get_valorant_status() -> Result<ValorantStatus, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(Url::parse("https://riotstatus.vercel.app/valorant")?)
         .send()
         .await?
@@ -69,7 +77,7 @@ pub struct Links {
 }
 
 pub async fn get_lyrics<S: Into<String>>(title: S) -> Result<Lyrics, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(Url::parse_with_params(
             "https://some-random-api.ml/lyrics",
             &[("title", title.into())],
@@ -99,7 +107,7 @@ pub struct UrbanList {
 }
 
 pub async fn urban_dict<S: Into<String>>(term: S) -> Result<UrbanList, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(Url::parse_with_params(
             "http://api.urbandictionary.com/v0/define",
             &[("term", term.into())],
@@ -137,7 +145,7 @@ pub async fn define_term<S: Into<String>>(
     word: S,
     lang: S,
 ) -> Result<Vec<DictionaryElement>, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(
             Url::parse("https://api.dictionaryapi.dev/api/v2/entries/")?
                 .join(&(lang.into() + "/"))?
@@ -157,7 +165,7 @@ pub struct ChuckResponse {
 }
 
 pub async fn get_chuck() -> Result<ChuckResponse, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(Url::parse("https://api.chucknorris.io/jokes/random")?)
         .send()
         .await?
@@ -174,7 +182,7 @@ pub async fn neko_api<S: Into<String>>(
         url = url.join("img/")?;
     }
     url = url.join(&endpoint.into())?;
-    Ok(Client::new()
+    Ok(CLIENT
         .get(url)
         .send()
         .await?
@@ -183,7 +191,7 @@ pub async fn neko_api<S: Into<String>>(
 }
 
 pub async fn get_translate<S: Into<String>>(target: S, text: S) -> Result<String, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get(Url::parse_with_params(
             "https://translate.googleapis.com/translate_a/single",
             &[
@@ -333,7 +341,7 @@ pub async fn get_trivia(
     category: TriviaCategory,
     difficulty: TriviaDifficulty,
 ) -> Result<TriviaResponse, ApiError> {
-    Ok(Client::new()
+    Ok(CLIENT
         .get("https://opentdb.com/api.php")
         .query(&[
             ("amount", amount.to_string()),
@@ -344,4 +352,176 @@ pub async fn get_trivia(
         .await?
         .json::<TriviaResponse>()
         .await?)
+}
+
+// Structs used to deserialize the output of the reddit api.
+#[derive(Deserialize, Clone)]
+pub struct RedditPost {
+    pub title: String,
+    pub subreddit_name_prefixed: String,
+    pub selftext: String,
+    pub downs: i64,
+    pub ups: i64,
+    pub created: f64,
+    pub url: String,
+    pub over_18: bool,
+    pub permalink: String,
+}
+#[derive(Deserialize)]
+struct RedditDataChild {
+    data: RedditPost,
+}
+
+#[derive(Deserialize)]
+struct RedditData {
+    dist: i64,
+    children: Vec<RedditDataChild>,
+}
+
+#[derive(Deserialize)]
+struct RedditResponse {
+    data: RedditData,
+}
+
+// Gets a random post from a vector of subreddit.
+pub async fn reddit_random_post(
+    subreddits: Vec<&str>,
+    image: bool,
+) -> Result<RedditPost, ApiError> {
+    let subreddit = subreddits.choose(&mut thread_rng()).unwrap();
+    let url = Url::parse(&format!(
+        r"https://www.reddit.com/r/{}/hot/.json?sort=top&t=week&limit=25",
+        subreddit
+    ))?;
+    let data = CLIENT
+        .get(url)
+        .header("User-Agent", "bowot")
+        .send()
+        .await?
+        .json::<RedditResponse>()
+        .await?;
+    let posts = data.data.children;
+    let mut rng = thread_rng();
+    let mut idx: i64 = rng.gen_range(0, data.data.dist);
+    let mut post: RedditPost;
+    for _ in 0..10 {
+        post = posts[idx as usize].data.clone();
+        if !post.over_18 {
+            if image {
+                if IMAGE_EXT_RE.is_match(&post.url) {
+                    return Ok(post);
+                }
+            } else {
+                if post.selftext != "" && post.selftext.len() < 2048 {
+                    return Ok(post);
+                }
+            }
+        }
+        idx = rng.gen_range(0, data.data.dist);
+    }
+    Err("No result found".into())
+}
+
+#[derive(Debug, Deserialize)]
+struct Artist {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpotifyTrack {
+    artists: Vec<Artist>,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Item {
+    track: SpotifyTrack,
+}
+
+#[derive(Debug, Deserialize)]
+struct Tracks {
+    items: Vec<Item>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpotifyData {
+    name: String,
+    tracks: Tracks,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpotifyToken {
+    client_id: String,
+    access_token: String,
+    access_token_expiration_timestamp_ms: i64,
+    is_anonymous: bool,
+}
+
+async fn spotify_get_access_token<S: Into<String>>(spotify_url: S) -> Result<String, ApiError> {
+    Ok(CLIENT
+        .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0",
+        )
+        .header(
+            "Accept",
+            "application/json",
+        )
+        .header("Accept-Language", "en")
+        .header("app-platform", "WebPlayer")
+        .header("spotify-app-version", "1.1.50.23.gb3574ed3")
+        .header("DNT", "1")
+        .header("Connection", "keep-alive")
+        .header("Cookie", "sp_t=7965d077939bf34fc3e922d08601ec9b; sp_landing=https%3A%2F%2Fopen.spotify.com%2Fplaylist%2F7FK4Xae9oH4IdTCAZ2otdT")
+        .header("TE", "Trailers")
+        .header("Referer", spotify_url.into().clone())
+        .send().await?.json::<SpotifyToken>().await?.access_token)
+}
+
+pub async fn get_spotify_tracks<S: Into<String> + Copy + std::fmt::Debug>(
+    spotify_url: S,
+) -> Result<(String, Vec<String>), ApiError> {
+    let access_token = spotify_get_access_token(spotify_url.into().clone()).await?;
+    let playlist_id = spotify_url
+        .into()
+        .strip_prefix("https://open.spotify.com/playlist/")
+        .unwrap()
+        .to_string();
+    let spotify_data = CLIENT
+        .get(Url::parse(&format!(
+            "https://api.spotify.com/v1/playlists/{}?type=track%2Cepisode&market=US",
+            playlist_id
+        ))?)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0",
+        )
+        .header("Accept", "application/json")
+        .header("Accept-Language", "en")
+        .header("Referer", "https://open.spotify.com/")
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .json::<SpotifyData>()
+        .await?;
+    let tracks: Vec<String> = spotify_data
+        .tracks
+        .items
+        .iter()
+        .map(|t| format!("{} - {}", t.track.artists[0].name, t.track.name))
+        .collect();
+    return Ok((spotify_data.name, tracks));
+}
+
+pub async fn generate_triggered_avatar<S: Into<String>>(avatar: S) -> Result<Vec<u8>, ApiError> {
+    Ok(CLIENT
+        .get("https://some-random-api.ml/canvas/triggered")
+        .query(&[("avatar", avatar.into())])
+        .send()
+        .await?
+        .bytes()
+        .await?
+        .to_vec())
 }
