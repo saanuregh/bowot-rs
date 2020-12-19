@@ -49,7 +49,7 @@ impl TypeMapKey for PrefixCache {
     type Value = Arc<RwLock<HashMap<i64, String>>>;
 }
 
-#[tokio::main(core_threads = 8)]
+#[tokio::main]
 #[instrument]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if *(constants::TRACING) {
