@@ -1,5 +1,4 @@
 use crate::{database::Guild, service::start_services, Database};
-use itconfig::*;
 use regex::Regex;
 use serenity::{
     async_trait,
@@ -26,7 +25,7 @@ impl EventHandler for Handler {
 
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
         let ctx = Arc::new(ctx.clone());
-        if (get_env_or_default::<bool, bool>("ENABLE_SERVICES", true)) {
+        if *(crate::constants::ENABLE_SERVICES) {
             info!("Starting services");
             tokio::join!(start_services(ctx));
         }
@@ -92,8 +91,7 @@ impl EventHandler for Handler {
                 db_guild
             }
             Err(_) => {
-                let p = get_env_or_default("PREFIX", "!");
-                let mut db_guild = Guild::new(guild_id, p);
+                let mut db_guild = Guild::new(guild_id);
                 non_bot_members.iter().for_each(|id| {
                     if let Err(e) = db_guild.add_member(*id) {
                         error!("{:?}", e);

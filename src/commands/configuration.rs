@@ -1,4 +1,6 @@
-use crate::{database::Guild, framework::MASTER_GROUP, utils::checks::*, Database};
+use crate::{
+    database::Guild, framework::MASTER_GROUP, service::cache_prefix, utils::checks::*, Database,
+};
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use serenity::{
     collector::MessageCollectorBuilder,
@@ -8,7 +10,7 @@ use serenity::{
     model::id::RoleId,
     prelude::Context,
 };
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 /// Configures the bot for the guild/server it was invoked on.
 ///
@@ -63,6 +65,7 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         format!("Successfully changed your prefix to `{}`", prefix),
     )
     .await?;
+    cache_prefix(Arc::new(ctx.clone())).await;
     Ok(())
 }
 

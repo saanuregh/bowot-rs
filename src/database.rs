@@ -1,3 +1,4 @@
+use crate::constants::DEFAULT_PREFIX;
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serenity::model::id::{GuildId, RoleId, UserId};
@@ -37,13 +38,13 @@ pub struct Guild {
 }
 
 impl Guild {
-    pub fn new(guild_id: GuildId, prefix: String) -> Self {
+    pub fn new(guild_id: GuildId) -> Self {
         Guild {
             id: None,
             guild_id: guild_id.0 as i64,
             self_roles: vec![],
             members: vec![],
-            prefix: prefix,
+            prefix: DEFAULT_PREFIX.clone(),
             default_role: 0,
             custom_commands: vec![],
             trigger_phrases: vec![TriggerPhrase {

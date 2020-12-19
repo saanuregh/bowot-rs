@@ -1,10 +1,10 @@
 use crate::{
+    constants::{HYDRATE, STATUSES},
     database::{get_all_cmd_stats, get_all_guilds},
-    lang::{HYDRATE, STATUSES},
     utils::basic_functions::{
         get_meta_info, get_process_usage, get_shard_latency, get_uptime, merge_json,
     },
-    Database,
+    Database, PrefixCache,
 };
 use handlebars::Handlebars;
 use lazy_static::lazy_static;
@@ -14,7 +14,10 @@ use serenity::{
     model::{gateway::Activity, id::UserId, user::OnlineStatus},
     prelude::Context,
 };
-use std::{collections::HashSet, convert::Infallible};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+};
 use std::{sync::Arc, time::Duration};
 use tracing::{error, info};
 use warp::{sse::ServerSentEvent, Filter};
@@ -147,14 +150,28 @@ async fn status_update(ctx: Arc<Context>) {
     info!("Status update done");
 }
 
+pub async fn cache_prefix(ctx: Arc<Context>) {
+    let data = ctx.data.read().await;
+    let db = data.get::<Database>().unwrap();
+    let mut prefix_cache = data.get::<PrefixCache>().unwrap().write().await;
+    *prefix_cache = HashMap::new();
+    if let Ok(guilds) = get_all_guilds(db).await {
+        for g in guilds {
+            prefix_cache.insert(g.guild_id, g.prefix);
+        }
+    }
+    info!("Caching prefix done");
+}
+
 pub async fn start_services(ctx: Arc<Context>) {
     let ctx_clone1 = Arc::clone(&ctx);
     let ctx_clone2 = Arc::clone(&ctx);
     let ctx_clone3 = Arc::clone(&ctx);
+    let ctx_clone4 = Arc::clone(&ctx);
     tokio::spawn(async move {
         loop {
-            tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone1)));
-            tokio::time::delay_for(Duration::from_secs(2700)).await;
+            tokio::join!(cache_prefix(Arc::clone(&ctx_clone1)));
+            tokio::time::delay_for(Duration::from_secs(900)).await;
         }
     });
     tokio::spawn(async move {
@@ -164,7 +181,13 @@ pub async fn start_services(ctx: Arc<Context>) {
         }
     });
     tokio::spawn(async move {
-        warp::serve(routes(Arc::clone(&ctx_clone3)).await)
+        loop {
+            tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone3)));
+            tokio::time::delay_for(Duration::from_secs(2700)).await;
+        }
+    });
+    tokio::spawn(async move {
+        warp::serve(routes(Arc::clone(&ctx_clone4)).await)
             .run(([127, 0, 0, 1], 3000))
             .await;
     });

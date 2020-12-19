@@ -1,4 +1,4 @@
-use crate::lang::SUBREDDIT_MEMES;
+use crate::constants::SUBREDDIT_MEMES;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use regex;
 use reqwest::Client;

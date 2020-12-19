@@ -1,16 +1,10 @@
 mod commands;
+mod constants;
 mod database;
 mod framework;
 mod handler;
-mod lang;
 mod service;
 mod utils;
-
-use std::{clone::Clone, collections::HashSet, sync::Arc, time::Instant};
-use tokio::sync::Mutex;
-use tracing::{error, info, instrument, Level};
-use tracing_log::LogTracer;
-use tracing_subscriber::FmtSubscriber;
 
 use itconfig::*;
 use serenity::{
@@ -21,13 +15,23 @@ use serenity::{
     http::Http,
     prelude::TypeMapKey,
 };
-use wither::mongodb::{Client as MongoClient, Database as MongoDatabase};
-
 use songbird::SerenityInit;
+use std::{
+    clone::Clone,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{error, info, instrument, Level};
+use tracing_log::LogTracer;
+use tracing_subscriber::FmtSubscriber;
+use wither::mongodb::{Client as MongoClient, Database as MongoDatabase};
 
 struct ShardManagerContainer; // Shard manager to use for the latency.
 struct Database; // The connection to the mongo database.
 struct Uptime; //  This is for the startup time of the bot.
+struct PrefixCache; //  This is for caching prefix.
 
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
@@ -41,12 +45,16 @@ impl TypeMapKey for Uptime {
     type Value = Instant;
 }
 
+impl TypeMapKey for PrefixCache {
+    type Value = Arc<RwLock<HashMap<i64, String>>>;
+}
+
 #[tokio::main(core_threads = 8)]
 #[instrument]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if get_env_or_default::<bool, bool>("TRACING", false) {
+    if *(constants::TRACING) {
         LogTracer::init()?;
-        let base_level: &str = get_env_or_default("TRACE_LEVEL", "info");
+        let base_level = *(constants::TRACE_LEVEL);
         let level = match base_level {
             "error" => Level::ERROR,
             "warn" => Level::WARN,
@@ -96,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mongo_uri = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
             let mongo_database = MongoClient::with_uri_str(&mongo_uri)
                 .await?
-                .database(get_env_or_default::<&str, &str>("DATABASE", "bowot"));
+                .database(*(constants::DATABASE));
             data.insert::<Database>(mongo_database.clone());
             info!("Database initialized");
         }
@@ -106,6 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Set current time as the uptime.
         data.insert::<Uptime>(Instant::now());
+
+        data.insert::<PrefixCache>(Arc::new(RwLock::new(HashMap::new())));
     }
 
     // start listening for events by starting a single shard

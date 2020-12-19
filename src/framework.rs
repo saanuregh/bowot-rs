@@ -3,11 +3,11 @@ use crate::{
         configuration::*, economy::*, fun::*, games::*, hydrate::*, meta::*, moderation::*,
         music::*, reddit::*, roleplay::*,
     },
+    constants::DEFAULT_PREFIX,
     database::*,
-    Database,
+    Database, PrefixCache,
 };
 
-use itconfig::*;
 use serenity::{
     framework::standard::{
         help_commands,
@@ -286,14 +286,13 @@ async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command
 #[hook]
 async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     let data = ctx.data.read().await;
-    let mut p = get_env_or_default("PREFIX", "!");
-    if let Some(id) = &msg.guild_id {
-        let db = data.get::<Database>().unwrap();
-        if let Ok(guild) = Guild::from_db(db, *id).await {
-            p = guild.prefix;
+    if let Some(id) = msg.guild_id {
+        let prefix_cache = data.get::<PrefixCache>().unwrap().read().await;
+        if let Some(p) = prefix_cache.get(&(id.0 as i64)) {
+            return Some(p.clone());
         }
     }
-    Some(p)
+    Some(DEFAULT_PREFIX.clone())
 }
 
 // Helper function to build serenity command framework
