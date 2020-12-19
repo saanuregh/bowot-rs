@@ -1,5 +1,5 @@
 use crate::{
-    constants::{HYDRATE, STATUSES},
+    constants::{HYDRATE, PORT, STATUSES},
     database::{get_all_cmd_stats, get_all_guilds},
     utils::basic_functions::{
         get_meta_info, get_process_usage, get_shard_latency, get_uptime, merge_json,
@@ -188,7 +188,7 @@ pub async fn start_services(ctx: Arc<Context>) {
     });
     tokio::spawn(async move {
         warp::serve(routes(Arc::clone(&ctx_clone4)).await)
-            .run(([127, 0, 0, 1], 3000))
+            .run(([127, 0, 0, 1], *PORT))
             .await;
     });
 }

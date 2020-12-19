@@ -20,4 +20,5 @@ lazy_static! {
     pub static ref TRACING: bool = get_env_or_default::<bool, bool>("TRACING", false);
     pub static ref TRACE_LEVEL: &'static str = get_env_or_default("TRACE_LEVEL", "info");
     pub static ref DATABASE: &'static str = get_env_or_default("DATABASE", "bowot");
+    pub static ref PORT: u16 = get_env_or_default::<u16, u16>("PORT", 80);
 }

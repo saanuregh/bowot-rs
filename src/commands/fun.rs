@@ -967,16 +967,18 @@ async fn pp(ctx: &Context, msg: &Message) -> CommandResult {
     ];
     let user = msg.mentions.get(0).unwrap_or(&msg.author);
     let length = user.id.0 % 101;
+    let bot_name = ctx.cache.current_user().await.name.clone();
     msg.channel_id
         .send_message(ctx, |m| {
             m.reference_message(msg);
             m.embed(|e| {
-                e.title("Dr bowot's PP report");
+                e.title(format!("Dr {}'s PP report", bot_name));
                 e.description(format!(
-                    "Patient: {}\nScan: 8{}D\nVerdict: {}\n\nSigned by,\n_Dr bowot_",
+                    "Patient: {}\nScan: 8{}D\nVerdict: {}\n\nSigned by,\n_Dr {}_",
                     user.mention(),
                     "=".repeat((length / 10) as usize),
                     verdict[(length / (100 / (verdict.len() - 1)) as u64) as usize],
+                    bot_name
                 ))
             })
         })
