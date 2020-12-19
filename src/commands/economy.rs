@@ -1,4 +1,4 @@
-use crate::{database::Guild, Database};
+use crate::{database::Guild, utils::basic_functions::format_seconds, Database};
 use chrono::prelude::*;
 use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use rand::distributions::WeightedIndex;
@@ -8,7 +8,6 @@ use serenity::{
     model::channel::Message,
     prelude::Context,
 };
-use std::time::Duration;
 
 /// Check your current cowoins balance.
 #[command]
@@ -111,7 +110,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
             ctx,
             format!(
                 "Wait another {} to redeem your daily cowoins",
-                humantime::format_duration(Duration::from_secs(86400 - difference as u64))
+                format_seconds(86400 - difference as u64)
             ),
         )
         .await?;

@@ -1,4 +1,4 @@
-use crate::{database::Guild, service::service_loop, Database};
+use crate::{database::Guild, service::start_services, Database};
 use itconfig::*;
 use regex::Regex;
 use serenity::{
@@ -28,7 +28,7 @@ impl EventHandler for Handler {
         let ctx = Arc::new(ctx.clone());
         if (get_env_or_default::<bool, bool>("ENABLE_SERVICES", true)) {
             info!("Starting services");
-            tokio::join!(service_loop(ctx));
+            tokio::join!(start_services(ctx));
         }
     }
 

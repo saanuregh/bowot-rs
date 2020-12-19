@@ -1,5 +1,5 @@
 use crate::utils::basic_functions::{
-    get_rest_latency, get_shard_latency, meta_info, MetaInfoResult,
+    get_meta_info, get_rest_latency, get_shard_latency, MetaInfoResult,
 };
 use serenity::{
     framework::standard::{macros::command, CommandResult},
@@ -98,14 +98,9 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     let MetaInfoResult {
         shard_latency,
         uptime,
-        full_mem,
-        reasonable_mem,
+        memory_usage,
+        cpu_usage,
         version,
-        c_blank,
-        c_comment,
-        c_code,
-        c_lines,
-        command_count,
         hoster_tag,
         hoster_id,
         bot_name,
@@ -114,7 +109,7 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
         num_shards,
         num_channels,
         num_priv_channels,
-    } = meta_info(ctx).await;
+    } = get_meta_info(ctx).await;
     message.edit(ctx, |m| {
         m.content("");
         m.embed(|e| {
@@ -122,14 +117,12 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
             e.url("https://github.com/saanuregh/bowot-rs");
             e.description("General Purpose Discord Bot made in [Rust](https://www.rust-lang.org/) using [serenity.rs](https://github.com/serenity-rs/serenity)\nHaving any issues, just dm me 😊.");
             e.field("Statistics:", format!("Shards: {}\nGuilds: {}\nChannels: {}\nPrivate Channels: {}", num_shards, num_guilds, num_channels, num_priv_channels), true);
-            e.field("Lines of code:", format!("Blank: {}\nComment: {}\nCode: {}\nTotal Lines: {}", c_blank, c_comment, c_code, c_lines), true);
             e.field("Currently hosted by:", format!("Tag: {}\nID: {}", hoster_tag, hoster_id), true);
             e.field("Latency:", format!("Gateway:\n`{}ms`\nREST:\n`{}ms`", shard_latency, rest_latency), true);
-            e.field("Memory usage:", format!("Complete:\n`{} KB`\nBase:\n`{} KB`",full_mem, reasonable_mem), true);
-            e.field("Somewhat Static Stats:", format!("Command Count:\n`{}`\nUptime:\n`{}`", command_count, uptime), true);
-            if let Some(x) = bot_icon {
-                e.thumbnail(x);
-            }
+            e.field("CPU Usage:", format!("`{:.2} %`",cpu_usage), true);
+            e.field("Memory Usage:", format!("`{} KB`", memory_usage), true);
+            e.field("Uptime:", format!("`{}`", uptime), true);
+            e.thumbnail(bot_icon);
             e
         });
         m

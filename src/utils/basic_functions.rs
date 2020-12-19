@@ -1,13 +1,9 @@
 use crate::{ShardManagerContainer, Uptime};
-use lazy_static::lazy_static;
-use num_format::{Locale, ToFormattedString};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use serenity::{client::bridge::gateway::ShardId, model::channel::Message, prelude::Context};
-use std::{fs::read_to_string, process::id};
-use tokio::{process::Command, time::Instant};
-use toml::Value;
-use walkdir::WalkDir;
+use sysinfo::{get_current_pid, ProcessExt, RefreshKind, System, SystemExt};
+use tokio::time::Instant;
 
 // Capitalizes the first letter of a str.
 pub fn capitalize_first(input: &str) -> String {
@@ -16,6 +12,24 @@ pub fn capitalize_first(input: &str) -> String {
         None => String::new(),
         Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
     }
+}
+
+pub fn format_seconds(seconds: u64) -> String {
+    let d = seconds / 86_400;
+    let h = seconds / 3600 % 24;
+    let m = seconds % 3600 / 60;
+    let s = seconds % 3600 % 60;
+    let mut output = format!("{}s", s);
+    if m != 0 {
+        output = format!("{}m {}", m, output);
+    }
+    if h != 0 {
+        output = format!("{}h {}", h, output);
+    }
+    if d != 0 {
+        output = format!("{}D {}", d, output);
+    }
+    output
 }
 
 pub fn shorten(s: &str, max_chars: usize) -> String {
@@ -64,56 +78,17 @@ pub fn string_to_seconds(text: impl ToString) -> u64 {
     seconds
 }
 
-#[derive(Default)]
-struct CodeStruct {
-    c_blank: u32,
-    c_comment: u32,
-    c_code: u32,
-    c_lines: u32,
-    command_count: u32,
-}
-
-lazy_static! {
-    static ref CODE: CodeStruct = {
-        let mut c = CodeStruct::default();
-        for entry in WalkDir::new("src") {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() {
-                let count = loc::count(path.to_str().unwrap());
-                let text = read_to_string(&path).unwrap();
-                c.command_count += text.match_indices("#[command]").count() as u32;
-                c.c_blank += count.blank;
-                c.c_comment += count.comment;
-                c.c_code += count.code;
-                c.c_lines += count.lines;
-            }
-        }
-        c
-    };
-    static ref VERSION: String = {
-        let data = include_str!("../../Cargo.toml").parse::<Value>().unwrap();
-        let version = data["package"]["version"].as_str().unwrap();
-        version.to_string()
-    };
-}
-
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct MetaInfoResult {
     pub shard_latency: String,
     pub uptime: String,
-    pub full_mem: String,
-    pub reasonable_mem: String,
-    pub version: String,
-    pub c_blank: u32,
-    pub c_comment: u32,
-    pub c_code: u32,
-    pub c_lines: u32,
-    pub command_count: u32,
+    pub memory_usage: u64,
+    pub cpu_usage: f32,
+    pub version: &'static str,
     pub hoster_tag: String,
     pub hoster_id: u64,
     pub bot_name: String,
-    pub bot_icon: Option<String>,
+    pub bot_icon: String,
     pub num_guilds: usize,
     pub num_shards: u64,
     pub num_channels: usize,
@@ -146,79 +121,60 @@ pub async fn get_uptime(ctx: &Context) -> String {
     let data = ctx.data.read().await;
     let instant = data.get::<Uptime>().unwrap();
     let duration = instant.elapsed();
-    humantime::format_duration(duration).to_string()
+    format_seconds(duration.as_secs())
 }
 
-pub async fn get_memory_usage() -> (String, String) {
-    let pid = id().to_string();
-    let full_stdout = Command::new("sh")
-        .arg("-c")
-        .arg(format!(r"pmap {} | tail -n 1 | awk '/[0-9]K/{{print $2}}'", &pid).as_str())
-        .output()
-        .await
-        .expect("failed to execute process");
-    let reasonable_stdout = Command::new("sh")
-        .arg("-c")
-        .arg(
-            format!(
-                "pmap {} | head -n 2 | tail -n 1 | awk '/[0-9]K/{{print $2}}'",
-                &pid
-            )
-            .as_str(),
-        )
-        .output()
-        .await
-        .expect("failed to execute process");
-    let mut full_mem = String::from_utf8(full_stdout.stdout).unwrap();
-    let mut reasonable_mem = String::from_utf8(reasonable_stdout.stdout).unwrap();
-    full_mem.pop();
-    full_mem.pop();
-    full_mem = full_mem
-        .parse::<u32>()
-        .expect("NaN")
-        .to_formatted_string(&Locale::en);
-    reasonable_mem.pop();
-    reasonable_mem.pop();
-    reasonable_mem = reasonable_mem
-        .parse::<u32>()
-        .expect("NaN")
-        .to_formatted_string(&Locale::en);
-    (full_mem, reasonable_mem)
+pub fn get_process_usage() -> (f32, u64) {
+    let pid = get_current_pid().unwrap();
+    let s = System::new_with_specifics(RefreshKind::new().with_processes());
+    let p = s.get_process(pid).unwrap();
+    (p.cpu_usage(), p.memory())
 }
 
-pub async fn meta_info(ctx: &Context) -> MetaInfoResult {
+pub async fn get_meta_info(ctx: &Context) -> MetaInfoResult {
     let shard_latency = get_shard_latency(ctx).await;
     let uptime = get_uptime(ctx).await;
     let (hoster_tag, hoster_id) = {
         let app_info = ctx.http.get_current_application_info().await.unwrap();
         (app_info.owner.tag(), app_info.owner.id.as_u64().clone())
     };
-    let (full_mem, reasonable_mem) = get_memory_usage().await;
+    let (cpu_usage, memory_usage) = get_process_usage();
     let current_user = ctx.cache.current_user().await;
     let bot_name = current_user.name.clone();
-    let bot_icon = current_user.avatar_url();
+    let bot_icon = current_user
+        .avatar_url()
+        .unwrap_or(current_user.default_avatar_url());
     let num_guilds = ctx.cache.guilds().await.len();
     let num_shards = ctx.cache.shard_count().await;
     let num_channels = ctx.cache.guild_channel_count().await;
     let num_priv_channels = ctx.cache.private_channels().await.len();
+    let version = env!("CARGO_PKG_VERSION");
     MetaInfoResult {
         shard_latency,
         bot_icon,
         bot_name,
-        full_mem,
-        reasonable_mem,
+        cpu_usage,
+        memory_usage,
         uptime,
-        version: VERSION.clone(),
+        version,
         hoster_id,
         hoster_tag,
         num_channels,
         num_guilds,
         num_priv_channels,
         num_shards,
-        c_blank: CODE.c_blank,
-        c_code: CODE.c_code,
-        c_comment: CODE.c_comment,
-        c_lines: CODE.c_lines,
-        command_count: CODE.command_count,
+    }
+}
+
+pub fn merge_json(a: &mut Value, b: &Value) {
+    match (a, b) {
+        (&mut Value::Object(ref mut a), &Value::Object(ref b)) => {
+            for (k, v) in b {
+                merge_json(a.entry(k.clone()).or_insert(Value::Null), v);
+            }
+        }
+        (a, b) => {
+            *a = b.clone();
+        }
     }
 }

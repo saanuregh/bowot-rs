@@ -1,7 +1,5 @@
-use crate::utils::basic_functions::shorten;
+use crate::utils::basic_functions::{format_seconds, shorten};
 use rand::Rng;
-use regex::Regex;
-use serde_json;
 use serenity::{
     async_trait,
     builder::CreateMessage,
@@ -170,28 +168,9 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 #[min_args(1)]
 #[aliases(p)]
 async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut embeded = false;
-    let mut query = args.message().to_string();
-    if query.starts_with('<') && query.ends_with('>') {
-        embeded = true;
-        let re = Regex::new("[<>]").unwrap();
-        query = re.replace_all(&query, "").into_owned();
-    }
-    if !embeded {
-        if let Err(_) = ctx
-            .http
-            .edit_message(
-                msg.channel_id.0,
-                msg.id.0,
-                &serde_json::json!({"flags" : 4}),
-            )
-            .await
-        {
-            if query.starts_with("http") {
-                msg.reply(ctx, "Please, put the url between <> so it doesn't embed.")
-                    .await?;
-            }
-        }
+    let query = args.message().to_string();
+    if !msg.embeds.is_empty() {
+        let _ = msg.clone().suppress_embeds(ctx).await;
     }
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let manager = songbird::get(ctx)
@@ -711,7 +690,7 @@ fn _now_playing_embed(m: &mut CreateMessage, np: Metadata) {
 fn _duration_format(duration: Option<Duration>) -> String {
     if let Some(d) = duration {
         if d != Duration::default() {
-            return humantime::format_duration(d).to_string();
+            return format_seconds(d.as_secs());
         }
     }
     "Live".to_string()

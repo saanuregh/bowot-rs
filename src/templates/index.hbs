@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <!-- Meta tags -->
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' name='viewport' />
+  <meta name="viewport" content="width=device-width" />
+
+  <!-- Chrome, Firefox OS and Opera mobile address bar theming -->
+  <meta name="theme-color" content="#000000">
+  <!-- Windows Phone mobile address bar theming -->
+  <meta name="msapplication-navbutton-color" content="#000000">
+  <!-- iOS Safari mobile address bar theming -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="#000000">
+
+  <title>{{bot_name}} v{{version}}</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/halfmoon@1.1.1/css/halfmoon.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css"
+    integrity="sha512-+4zCK9k+qNFUR5X+cKL9EIR+ZOhtIloNl9GIKS57V1MyNsYpYcUrUeQc9vNfzsWfV28IaLL3i96P9sdNyeRssA=="
+    crossorigin="anonymous" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="dark-mode with-custom-webkit-scrollbars with-custom-css-scrollbars" data-dm-shortcut-enabled="true"
+  data-sidebar-shortcut-enabled="true">
+
+  <!-- Page wrapper start -->
+  <div id="page-wrapper" class="page-wrapper with-navbar with-sidebar with-navbar-fixed-bottom"
+    data-sidebar-type="default">
+    <!-- Navbar start -->
+    <nav class="navbar">
+      <div class="navbar-content">
+        <button class="btn btn-square btn-primary rounded-circle d-block d-sm-none" type="button"
+          onclick="halfmoon.toggleSidebar()">
+          <i class="fa fa-bars" aria-hidden="true"></i>
+          <span class="sr-only">Toggle sidebar</span> <!-- sr-only = show only on screen readers -->
+        </button>
+      </div>
+      <a href="#" class="navbar-brand ml-10 ml-sm-20">
+        <img class="rounded-circle" src="{{bot_icon}}" alt="fake-logo">
+        <span class="d-none d-sm-flex">{{bot_name}} v{{version}}</span>
+      </a>
+    </nav>
+    <!-- Navbar end -->
+
+    <!-- Sidebar start -->
+    <div class="sidebar">
+      <div class="sidebar-menu">
+        <h5 class="sidebar-title">CPU Usage</h5>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-link sidebar-link-with-icon">
+          <span class="sidebar-icon">
+            <i class="fa fa-microchip" aria-hidden="true"></i>
+          </span>
+          <span id="cpu_usage">{{cpu_usage}}</span>
+          <span style="margin-left: 0.2rem;">%</span>
+        </div>
+        <h5 class="sidebar-title">Memory Usage</h5>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-link sidebar-link-with-icon">
+          <span class="sidebar-icon">
+            <i class="fa fa-memory" aria-hidden="true"></i>
+          </span>
+          <span id="memory_usage">{{memory_usage}}</span>
+          <span style="margin-left: 0.2rem;">KB</span>
+        </div>
+        <h5 class="sidebar-title">Shard Latency</h5>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-link sidebar-link-with-icon">
+          <span class="sidebar-icon">
+            <i class="fa fa-server" aria-hidden="true"></i>
+          </span>
+          <span id="shard_latency">{{shard_latency}}</span>
+          <span style="margin-left: 0.2rem;">ms</span>
+        </div>
+        <h5 class="sidebar-title">Uptime</h5>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-link sidebar-link-with-icon">
+          <span class="sidebar-icon">
+            <i class="fa fa-stopwatch" aria-hidden="true"></i>
+          </span>
+          <span id="uptime">{{uptime}}</span>
+          <span style="margin-left: 0.2rem;"></span>
+        </div>
+      </div>
+    </div>
+    <!-- Sidebar end -->
+
+    <!-- Content wrapper start -->
+    <div class="content-wrapper">
+      <div class="container-fluid">
+        <div class="row row-eq-spacing-lg">
+          <div class="card">
+            <h2 class="card-title">Total command invocations</h2>
+            <p>{{total_cmd_stat}}</p>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Most popular command</h2>
+            <p>{{popular_cmd}}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Content wrapper end -->
+
+  </div>
+  <!-- Page wrapper end -->
+
+  <!-- Halfmoon JS -->
+  <script src="https://cdn.jsdelivr.net/npm/halfmoon@1.1.1/js/halfmoon.min.js"></script>
+  <script type="text/javascript">
+    const memory_usage = document.getElementById('memory_usage');
+    const cpu_usage = document.getElementById('cpu_usage');
+    const uptime = document.getElementById('uptime');
+    const shard_latency = document.getElementById('shard_latency');
+    var uri = 'http://' + location.host + '/stats';
+    var sse = new EventSource(uri);
+    sse.onmessage = function (msg) {
+      let data = JSON.parse(msg.data);
+      memory_usage.innerText = data.memory_usage;
+      cpu_usage.innerText = data.cpu_usage.toFixed(2);
+      uptime.innerText = data.uptime;
+      shard_latency.innerText = data.shard_latency;
+    };
+  </script>
+</body>
+
+</html>

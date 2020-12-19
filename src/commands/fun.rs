@@ -167,10 +167,9 @@ async fn profile(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
                         "{}UTC\n({} ago)",
                         user.created_at().to_rfc2822().replace("+0000", ""),
                         {
-                            let date = chrono::Utc::now();
-                            let time = date.timestamp() - user.created_at().timestamp();
-                            let duration = Duration::from_secs(time as u64);
-                            humantime::format_duration(duration)
+                            let time =
+                                chrono::Utc::now().timestamp() - user.created_at().timestamp();
+                            format_seconds(time as u64)
                         }
                     ),
                     false,
