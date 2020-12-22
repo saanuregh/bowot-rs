@@ -6,7 +6,7 @@ use serenity::{
     client::Context,
     framework::standard::{macros::command, Args, CommandResult, Delimiter},
     http::Http,
-    model::{channel::Message, prelude::ChannelId},
+    model::{channel::Message, id::GuildId, prelude::ChannelId},
     prelude::Mutex,
 };
 
@@ -65,23 +65,35 @@ impl VoiceEventHandler for TrackEndNotifier {
 }
 
 struct ChannelIdleChecker {
-    handler_lock: Arc<Mutex<Call>>,
+    ctx: Arc<Context>,
+    guild_id: GuildId,
     elapsed: Arc<AtomicUsize>,
 }
 
 #[async_trait]
 impl VoiceEventHandler for ChannelIdleChecker {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        let mut handler = self.handler_lock.lock().await;
-        if handler.queue().is_empty() {
-            if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) > 15 {
-                let _ = handler.leave().await;
+        let manager = songbird::get(self.ctx.clone().as_ref())
+            .await
+            .expect("Songbird Voice client placed in at initialisation.")
+            .clone();
+        if let Some(handler_lock) = manager.get(self.guild_id) {
+            let queue_empty = {
+                let handler = handler_lock.lock().await;
+                handler.queue().is_empty()
+            };
+            if queue_empty {
+                if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) >= 1 {
+                    let _ = manager.remove(self.guild_id).await;
+                    return Some(Event::Cancel);
+                }
+            } else {
+                self.elapsed.store(0, Ordering::Relaxed);
+                return None;
             }
-        } else {
-            self.elapsed.store(0, Ordering::Relaxed);
         }
 
-        None
+        Some(Event::Cancel)
     }
 }
 
@@ -115,7 +127,8 @@ async fn _join(ctx: &Context, msg: &Message) -> Option<Arc<Mutex<Call>>> {
             handler.add_global_event(
                 Event::Periodic(Duration::from_secs(60), None),
                 ChannelIdleChecker {
-                    handler_lock: handler_lock.clone(),
+                    ctx: Arc::new(ctx.clone()),
+                    guild_id: guild.id,
                     elapsed: Default::default(),
                 },
             );
