@@ -83,7 +83,7 @@ impl VoiceEventHandler for ChannelIdleChecker {
                 handler.queue().is_empty()
             };
             if queue_empty {
-                if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) >= 1 {
+                if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) > 15 {
                     let _ = manager.remove(self.guild_id).await;
                     return Some(Event::Cancel);
                 }
