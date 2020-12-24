@@ -1,4 +1,7 @@
-use crate::utils::basic_functions::{format_seconds, shorten};
+use crate::utils::{
+    basic_functions::{format_seconds, shorten},
+    ytdl::{ytdl_info, YoutubeDlOutput},
+};
 use rand::Rng;
 use serenity::{
     async_trait,
@@ -16,7 +19,6 @@ use std::{
     time::Duration,
 };
 use tracing::error;
-use youtube_dl::{YoutubeDl, YoutubeDlOutput};
 
 use songbird::{
     input::Metadata,
@@ -203,7 +205,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     };
     let loading_msg = msg.reply(ctx, "Loading...").await?;
     let mut sources: Vec<Input> = Vec::new();
-    if let Ok(result) = YoutubeDl::new(query).run().await {
+    if let Ok(result) = ytdl_info(query, None).await {
         match result {
             YoutubeDlOutput::Playlist(p) => {
                 if let Some(playlist) = p.entries {

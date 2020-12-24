@@ -20,7 +20,6 @@ tracing-log = "0.1.1"
 tracing-subscriber = "0.2.15"
 tracing-futures = "0.2.4"
 wither = { version = "0.9.0-alpha.2", default-features = false, features = ["tokio-runtime"] }
-youtube_dl = { git = "https://github.com/saanuregh/youtube-dl-rs.git", branch = "async" }
 itconfig = "1.0"
 lazy_static = "1.4"
 strsim = "0.10.0"
@@ -28,11 +27,11 @@ html-escape = "0.2.6"
 warp = "0.2.5"
 handlebars = "3.5.1"
 sysinfo = "0.15.3"
+audiopus_sys = { version = "0.1.8", features = ["static"] }
 
 [dependencies.serenity]
 git = "https://github.com/serenity-rs/serenity"
 branch = "current"
-# rev = "b98424d382f54318b4999ccab4d59acb34449df8"
 # version = "0.9.2"
 default-features = false
 features = [
@@ -55,4 +54,3 @@ features = [
 features = ["builtin-queue"]
 git = "https://github.com/serenity-rs/songbird"
 branch = "current"
-# rev = "f222ce99696ab0dfa396bd6448bb4340b791625b"
