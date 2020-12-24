@@ -1,0 +1,10 @@
+target
+.env
+.env.example
+target
+Dockerfile
+Dockerfile.nocache
+docker-compose.yml
+.dockerignore
+.git
+.gitignore

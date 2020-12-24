@@ -2,5 +2,12 @@ version: "3"
 services:
   bowot:
     build: .
-    volumes:
-      - ./config.toml:/bowot/config.toml
+    environment:
+      - DATABASE_URL=mongodb+srv://saanuregh:WdwC9gBeWFewxDGp@bowot.orqku.mongodb.net/?retryWrites=true&w=majority
+      - ENABLE_SERVICES=true
+      - PREFIX=.
+      - TOKEN=NzU1MDA5MDg5NzU0NDk3MDU2.X19DAg.3NCWlt9BmuUGSF3dI2DekTr9TIQ
+      - TRACE_LEVEL="info"
+      - TRACING=true
+      - DATABASE=bowot_test
+      - PORT=3000
