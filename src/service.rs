@@ -88,6 +88,7 @@ async fn stats_stream_sse(
 pub async fn routes(
     ctx: Arc<Context>,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    let health = warp::path("health").map(|| "OK");
     let index = warp::get()
         .and(warp::path::end())
         .and(with_context(ctx.clone()))
@@ -96,7 +97,7 @@ pub async fn routes(
         .and(warp::get())
         .and(with_context(ctx.clone()))
         .and_then(send_stats);
-    index.or(stats)
+    health.or(index).or(stats)
 }
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
@@ -188,7 +189,7 @@ pub async fn start_services(ctx: Arc<Context>) {
     });
     tokio::spawn(async move {
         warp::serve(routes(Arc::clone(&ctx_clone4)).await)
-            .run(([127, 0, 0, 1], *PORT))
+            .run(([0, 0, 0, 0], *PORT))
             .await;
     });
 }
