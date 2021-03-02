@@ -19,15 +19,8 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: Migrate database
-        run: |
-          cargo install --version=0.5.1 sqlx-cli --no-default-features --features postgres
-          SKIP_DOCKER=true ./scripts/init_db.sh
+      - uses: satackey/action-docker-layer-caching@v0.0.11
+        continue-on-error: true
       - uses: akhileshns/heroku-deploy@v3.12.12
         with:
           heroku_api_key: ${{secrets.HEROKU_API_KEY}}
