@@ -35,6 +35,7 @@ async fn reddit_command(
             })
         })
         .await?;
+        
     Ok(())
 }
 

@@ -1,21 +1,19 @@
-use crate::{database::Guild, service::start_services, Database};
+use crate::{data::PoolContainer, database::Guild, service::start_services};
 use regex::Regex;
 use serenity::{
     async_trait,
     model::{
         channel::Message,
         gateway::Ready,
-        guild::{Guild as DiscordGuild, GuildUnavailable, Member as DiscordMember, Role},
-        id::UserId,
-        id::{GuildId, RoleId},
-        user::User,
+        guild::{Guild as DiscordGuild, Member},
+        id::GuildId,
     },
     prelude::{Context, EventHandler},
 };
 use std::{clone::Clone, sync::Arc};
 use tracing::{error, info};
 
-pub struct Handler; // Defines the handler to be used for events.
+pub struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -40,16 +38,14 @@ impl EventHandler for Handler {
         // Trigger phrase detection and handling.
         if let Some(guild_id) = msg.guild_id {
             let data = ctx.data.read().await;
-            let db = data.get::<Database>().unwrap();
-            if let Ok(guild) = Guild::from_db(db, guild_id).await {
-                for trigger_phrase in guild.trigger_phrases {
+            let db = data.get::<PoolContainer>().unwrap();
+            if let Ok(triggers) = Guild::new(db, guild_id).get_triggers().await {
+                for trigger_phrase in triggers {
                     let re =
                         Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
                     if re.is_match(&msg.content) {
-                        if let Ok(_) = msg.reply(&ctx, &trigger_phrase.reply).await {
-                            if !trigger_phrase.emote.is_whitespace() {
-                                let _ = msg.react(&ctx, trigger_phrase.emote).await;
-                            }
+                        if let Err(_) = msg.reply(&ctx, &trigger_phrase.reply).await {
+                            error!("Error sending trigger message")
                         }
                     }
                 }
@@ -65,139 +61,42 @@ impl EventHandler for Handler {
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
         let guild_id = guild.id;
         let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        let non_bot_members: Vec<UserId> = guild
+        let db = data.get::<PoolContainer>().unwrap();
+        let non_bot_members: Vec<i64> = guild
             .members
             .into_iter()
             .filter(|(_id, m)| !m.user.bot)
-            .map(|(id, _m)| id)
+            .map(|(id, _m)| id.0 as i64)
             .collect();
-        let mut db_guild = match Guild::from_db(db, guild_id).await {
-            Ok(mut db_guild) => {
-                let old_db_members = db_guild.members.clone();
-                db_guild.members = Vec::new();
-                non_bot_members.iter().for_each(|id| {
-                    if let Some(t) = old_db_members
-                        .iter()
-                        .find(|old_db_member| old_db_member.id == id.0 as i64)
-                    {
-                        db_guild.members.push(t.clone())
-                    } else {
-                        if let Err(e) = db_guild.add_member(*id) {
-                            error!("{:?}", e);
-                        }
-                    }
-                });
-                db_guild
-            }
-            Err(_) => {
-                let mut db_guild = Guild::new(guild_id);
-                non_bot_members.iter().for_each(|id| {
-                    if let Err(e) = db_guild.add_member(*id) {
-                        error!("{:?}", e);
-                    }
-                });
-                db_guild
-            }
+        let db_guild = Guild::new(db, guild_id);
+        if let Err(why) = db_guild.insert().await {
+            error!("error adding guild to db {:?}", why);
+            return;
         };
-        if let Err(e) = db_guild.save_guild(db).await {
-            error!("{:?}", e);
-        }
-    }
-
-    async fn guild_delete(
-        &self,
-        ctx: Context,
-        guild: GuildUnavailable,
-        _full: Option<DiscordGuild>,
-    ) {
-        let guild_id = guild.id;
-        let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        if let Ok(mut g) = Guild::from_db(db, guild_id).await {
-            if let Err(e) = g.delete_guild(db).await {
-                error!("{:?}", e);
+        if let Ok(db_members) = db_guild.get_members().await {
+            let db_member_ids: Vec<i64> = db_members.iter().map(|m| m.id).collect();
+            for id in non_bot_members {
+                if !db_member_ids.contains(&id) {
+                    if let Err(why) = db_guild.insert_member(id).await {
+                        error!("error adding member to db guild {:?}", why);
+                        return;
+                    };
+                }
             }
         }
     }
 
-    async fn guild_member_addition(
-        &self,
-        ctx: Context,
-        guild_id: GuildId,
-        mut new_member: DiscordMember,
-    ) {
-        if new_member.user.bot {
-            return;
-        }
-        let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        if let Ok(mut g) = Guild::from_db(db, guild_id).await {
-            if let Ok(g) = g.add_member(new_member.user.id) {
-                match g.save_guild(db).await {
-                    Ok(g) => {
-                        if g.default_role != 0 {
-                            let _ = new_member
-                                .add_role(ctx.clone(), g.default_role as u64)
-                                .await;
-                        }
+    async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
+        if !new_member.user.bot {
+            let member_id = new_member.user.id;
+            let data = ctx.data.read().await;
+            let db = data.get::<PoolContainer>().unwrap();
+            let db_guild = Guild::new(db, guild_id);
+            if let Ok(member) = db_guild.get_member(member_id).await {
+                if member.is_none() {
+                    if let Err(why) = db_guild.insert_member(member_id).await {
+                        error!("error adding member to db guild {:?}", why)
                     }
-                    Err(e) => error!("{:?}", e),
-                }
-            }
-        }
-    }
-
-    async fn guild_member_removal(
-        &self,
-        ctx: Context,
-        guild_id: GuildId,
-        user: User,
-        _member_data_if_available: Option<DiscordMember>,
-    ) {
-        if user.bot {
-            return;
-        }
-        let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        if let Ok(mut _g) = Guild::from_db(db, guild_id).await {
-            if let Ok(g) = _g.remove_member(user.id) {
-                if let Err(e) = g.save_guild(db).await {
-                    error!("{:?}", e);
-                }
-            }
-        }
-    }
-
-    async fn guild_role_delete(
-        &self,
-        ctx: Context,
-        guild_id: GuildId,
-        removed_role_id: RoleId,
-        _removed_role_data_if_available: Option<Role>,
-    ) {
-        let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        let mut change = false;
-        let role_id = removed_role_id;
-        if let Ok(mut guild) = Guild::from_db(db, guild_id).await {
-            if RoleId(guild.default_role as u64) == role_id {
-                if let Err(e) = guild.change_default_role(RoleId(0)) {
-                    error!("{:?}", e);
-                    return;
-                }
-                change = true;
-            }
-            if let Ok(_) = guild.self_roles.binary_search(&(role_id.0 as i64)) {
-                if let Err(e) = guild.remove_self_role(role_id) {
-                    error!("{:?}", e);
-                    return;
-                }
-                change = true;
-            }
-            if change {
-                if let Err(e) = guild.save_guild(db).await {
-                    error!("{:?}", e);
                 }
             }
         }

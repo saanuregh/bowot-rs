@@ -67,6 +67,7 @@ async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
 
         m
     }).await?;
+
     Ok(())
 }
 
@@ -87,6 +88,7 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
             })
         })
         .await?;
+
     Ok(())
 }
 
@@ -127,5 +129,6 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
         });
         m
     }).await?;
+
     Ok(())
 }

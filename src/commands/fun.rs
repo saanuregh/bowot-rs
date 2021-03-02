@@ -1,9 +1,7 @@
 use crate::{
-    database::Guild,
+    constants::{PP_RESPONSE, SHIP_RESPONSE},
     utils::{apis::*, basic_functions::*},
-    Database,
 };
-use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use fasteval::error::Error;
 use qrcode::{render::unicode, QrCode};
 use rand::{thread_rng, Rng};
@@ -32,6 +30,7 @@ async fn qr(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .light_color(unicode::Dense1x2::Dark)
         .build();
     msg.reply(ctx, format!(">>> ```{}```", image)).await?;
+
     Ok(())
 }
 
@@ -89,6 +88,7 @@ async fn urban(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             }
         };
     }
+
     Ok(())
 }
 
@@ -124,6 +124,7 @@ async fn translate(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
     let text = args.rest().to_string();
     let translated = get_translate(&target, &text).await?;
     msg.reply(ctx, translated).await?;
+
     Ok(())
 }
 
@@ -335,6 +336,7 @@ async fn calculator(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                 .await?;
         }
     }
+
     Ok(())
 }
 
@@ -434,6 +436,7 @@ async fn dictionary(ctx: &Context, msg: &Message, mut args: Args) -> CommandResu
             })
             .await?;
     }
+
     Ok(())
 }
 
@@ -472,23 +475,23 @@ async fn poll(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let title = args.single_quoted::<String>()?;
     let unformatted_options = args.rest();
     let seconds = string_to_seconds(unformatted_time.clone());
-    if seconds < 10 {
-        msg.reply(ctx, "Duration is too short, stay within 10 sec to 2 mins")
-            .await?;
-        return Ok(());
-    }
-    if seconds > 120 {
-        msg.reply(ctx, "Duration is too high, stay within 10 sec to 2 mins")
-            .await?;
-        return Ok(());
-    }
-    if unformatted_options.is_empty() {
-        msg.reply(ctx, "Poll options are not provided").await?;
-        return Ok(());
-    }
     let options = unformatted_options.split(",").collect::<Vec<&str>>();
-    if options.len() < 2 {
-        msg.reply(ctx, "Requires alteast 2 options").await?;
+    let error_msg = {
+        if seconds < 10 {
+            "Duration is too short, stay within 10 sec to 2 mins"
+        } else if seconds > 120 {
+            "Duration is too high, stay within 10 sec to 2 mins"
+        } else if unformatted_options.is_empty() {
+            "Poll options are not provided"
+        } else if options.len() < 2 {
+            "Requires alteast 2 options"
+        } else {
+            ""
+        }
+    };
+    if !error_msg.is_empty() {
+        msg.reply(ctx, error_msg).await?;
+
         return Ok(());
     }
     let reactions = vec![
@@ -592,6 +595,7 @@ async fn poll(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             })
         })
         .await?;
+
     Ok(())
 }
 
@@ -605,14 +609,16 @@ async fn chuck(ctx: &Context, msg: &Message) -> CommandResult {
             .unwrap_or("Chuck's a little busy here, try again later!".to_string()),
     )
     .await?;
+
     Ok(())
 }
 
 /// Throw a dice.
 #[command]
 async fn dice(ctx: &Context, msg: &Message) -> CommandResult {
-    let n: i64 = thread_rng().gen_range(1, 7);
+    let n: i64 = thread_rng().gen_range(1..7);
     msg.reply(ctx, format!("You rolled a {}", n)).await?;
+
     Ok(())
 }
 
@@ -714,6 +720,7 @@ async fn uwufy(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     m = m.replace("Ww", "W");
     m = m.replace("WW", "W");
     msg.reply(ctx, &m).await?;
+
     Ok(())
 }
 
@@ -727,6 +734,7 @@ async fn fact(ctx: &Context, msg: &Message) -> CommandResult {
             .unwrap_or(&"Couldn't find a fact, try again later!".to_string()),
     )
     .await?;
+
     Ok(())
 }
 
@@ -736,6 +744,7 @@ async fn why(ctx: &Context, msg: &Message) -> CommandResult {
     let resp = neko_api("why", false).await?;
     msg.reply(ctx, resp.get("why").unwrap_or(&"Why".to_string()))
         .await?;
+
     Ok(())
 }
 
@@ -754,91 +763,57 @@ async fn eightball(ctx: &Context, msg: &Message) -> CommandResult {
                     })
                 })
                 .await?;
+
             return Ok(());
         }
     }
     msg.reply(ctx, "Lost the eightball, try again later!")
         .await?;
+
     Ok(())
 }
 
-/// Get all custom commands in this guild.
-#[command]
-async fn custom_commands(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let cmds = Guild::from_db(db, guild_id).await?.custom_commands;
-    let mut table = Table::new();
-    table.force_no_tty().enforce_styling();
-    table.set_content_arrangement(Dynamic).set_table_width(100);
-    table.set_header(vec![
-        Cell::new("Name").set_alignment(Center),
-        Cell::new("Reply").set_alignment(Center),
-    ]);
-    for cmd in cmds.clone() {
-        table.add_row(vec![
-            Cell::new(cmd.name).set_alignment(Center),
-            Cell::new(cmd.reply).set_alignment(Center),
-        ]);
-    }
-    msg.channel_id
-        .send_message(ctx, |m| {
-            m.reference_message(msg);
-            m.embed(|e| {
-                e.title("Custom Commands");
-                e.description(format!("```\n{}\n```", table))
-            })
-        })
-        .await?;
-    Ok(())
-}
-
-/// Get all self roles in this guild.
-#[command]
-async fn self_roles(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let self_roles = Guild::from_db(db, guild_id).await?.self_roles;
-    let mut table = Table::new();
-    table.force_no_tty().enforce_styling();
-    table.set_content_arrangement(Dynamic).set_table_width(100);
-    table.set_header(vec![
-        Cell::new("Role id").set_alignment(Center),
-        Cell::new("Role name").set_alignment(Center),
-    ]);
-    let dguild = msg.guild(ctx).await.unwrap();
-    for (role_id, role) in dguild.roles.clone() {
-        let _role = role_id.0 as i64;
-        if self_roles.contains(&_role) {
-            table.add_row(vec![
-                Cell::new(_role).set_alignment(Center),
-                Cell::new(role.name).set_alignment(Center),
-            ]);
-        }
-    }
-    msg.channel_id
-        .send_message(ctx, |m| {
-            m.reference_message(msg);
-            m.embed(|e| {
-                e.title("Self roles");
-                e.description(format!("```\n{}\n```", table))
-            })
-        })
-        .await?;
-    Ok(())
-}
-
-/// Get valorant server status.
+/// Get valorant server status. Default region is asia
+///
+/// Usage:
+/// `valorant` for asia pacific server status
+/// `valorant ja こんにちは`
+///
+/// Supported languages:
+/// ```
+/// ap -> Asia Pacific (Default)
+/// br -> Brasil
+/// eu -> EU
+/// kr -> S. Korea
+/// latam -> Latin America
+/// na -> NA
+/// ```
 #[command]
 async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let supported_region = vec!["ap", "br", "eu", "kr", "latam", "na"];
+    let supported_region: HashMap<&str, &str> = [
+        ("ap", "Asia Pacific"),
+        ("br", "Brasil"),
+        ("eu", "EU"),
+        ("kr", "S. Korea"),
+        ("latam", "Latin America"),
+        ("na", "NA"),
+    ]
+    .iter()
+    .cloned()
+    .collect();
     let mut region = "ap".to_string();
     if args.len() > 0 {
         let _r = args.single_quoted::<String>()?;
-        if !supported_region.contains(&_r.as_str()) {
+        if supported_region.contains_key(_r.as_str()) {
             region = _r;
+        } else {
+            msg.reply(
+                ctx,
+                "Region not supported, `help valorant` to get supported regions",
+            )
+            .await?;
+
+            return Ok(());
         }
     }
     match get_valorant_status().await {
@@ -870,6 +845,7 @@ async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
                 .await?;
         }
     }
+
     Ok(())
 }
 
@@ -879,41 +855,15 @@ async fn valorant(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
 /// `ship <@user1> <@user2>`
 #[command]
 async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
-    let verdicts = vec![
-        "Not a slightest chance. You should give up.",
-        "You are more likely to get hit by a lightning than you two ever coming together",
-        "If there\"s a chance.. Why not?",
-        "You should be married now!",
-        "Both of you are definitely soulmates",
-        "Fate has decided",
-    ];
-    let title = vec![
-        "God has given up on you ",
-        "In other words, still no chance ",
-        "You make an average pair!",
-        "Onwards! To the church! ",
-        "I knew it! You make a unique pair!",
-        "PERFECT MATCH. The love powerlevel is over 9000 ",
-    ];
-    let emoji = vec![
-        "\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\🖤",
-        "\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️\\❤️",
-    ];
+    let ship_response = &*SHIP_RESPONSE;
     if msg.mentions.len() != 2 {
         msg.reply(ctx, "You must mention 2 different person to ship")
             .await?;
         return Ok(());
     }
     let percentage = (msg.mentions[0].id.0 + msg.mentions[1].id.0) % 101;
+    let idx = (percentage / 10) as usize;
+    let (emoji, title, verdict) = ship_response[idx];
     let color = Colour::from_rgb(
         {
             if percentage > 50 {
@@ -935,11 +885,11 @@ async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
         .send_message(ctx, |m| {
             m.reference_message(msg);
             m.embed(|e| {
-                e.title(title[(percentage / (100 / (title.len() - 1)) as u64) as usize]);
+                e.title(title);
                 e.description(format!(
                     "{}\n\n{}\n\n{} and {} compatibility reading is at **{}**%",
-                    emoji[(percentage / 10) as usize],
-                    verdicts[(percentage / (100 / (verdicts.len() - 1)) as u64) as usize],
+                    emoji,
+                    verdict,
                     msg.mentions[0].mention(),
                     msg.mentions[1].mention(),
                     percentage
@@ -948,6 +898,7 @@ async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
             })
         })
         .await?;
+
     Ok(())
 }
 
@@ -957,14 +908,7 @@ async fn ship(ctx: &Context, msg: &Message) -> CommandResult {
 /// `pp <@user>`
 #[command]
 async fn pp(ctx: &Context, msg: &Message) -> CommandResult {
-    let verdict = vec![
-        "What am i supposed to be looking here?",
-        "Micro PP!",
-        "Average PP!",
-        "Big PP!",
-        "Humongous PP!",
-        "ITS OVER 9000!",
-    ];
+    let verdict = &*PP_RESPONSE;
     let user = msg.mentions.get(0).unwrap_or(&msg.author);
     let length = user.id.0 % 101;
     let bot_name = ctx.cache.current_user().await.name.clone();
@@ -983,6 +927,7 @@ async fn pp(ctx: &Context, msg: &Message) -> CommandResult {
             })
         })
         .await?;
+
     Ok(())
 }
 
@@ -1010,6 +955,7 @@ async fn respect(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .react(&ctx, '🇫')
         .await?;
     msg.delete(&ctx).await?;
+
     Ok(())
 }
 
@@ -1035,9 +981,10 @@ async fn triggered(ctx: &Context, msg: &Message) -> CommandResult {
             m.reference_message(msg);
             m.add_file(AttachmentType::Bytes {
                 data: Cow::from(image),
-                filename: "triggered.gif".to_string(),
+                filename: format!("triggered-{}.gif", user.id),
             })
         })
         .await?;
+
     Ok(())
 }

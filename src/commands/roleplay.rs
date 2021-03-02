@@ -8,6 +8,7 @@ use serenity::{
 async fn _neko_command(ctx: &Context, msg: &Message, key: &str) -> CommandResult {
     if msg.mentions.len() != 1 {
         msg.reply(ctx, "You must mention 1 person").await?;
+
         return Ok(());
     }
     let title_builder = match key {
@@ -34,16 +35,18 @@ async fn _neko_command(ctx: &Context, msg: &Message, key: &str) -> CommandResult
                 m.embed(|e| {
                     e.description(
                         title_builder
-                            .replacen("{}", &user_1, 1)
-                            .replacen("{}", &user_2, 1),
+                            .replacen("{}", &user_1.to_string(), 1)
+                            .replacen("{}", &user_2.to_string(), 1),
                     );
                     e.image(url)
                 })
             })
             .await?;
         return Ok(());
+    }else {
+        msg.reply(ctx, "Can't find a gif").await?;
     }
-    msg.reply(ctx, "Can't find a gif").await?;
+
     Ok(())
 }
 

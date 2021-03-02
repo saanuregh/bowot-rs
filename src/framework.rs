@@ -4,8 +4,9 @@ use crate::{
         music::*, reddit::*, roleplay::*,
     },
     constants::DEFAULT_PREFIX,
-    database::*,
-    Database, PrefixCache,
+    data::PoolContainer,
+    database::Guild,
+    PrefixCache,
 };
 
 use serenity::{
@@ -23,7 +24,7 @@ use tracing::{debug, error, info};
 
 #[group("Master")]
 #[sub_groups(Meta, Fun, Music, Mod)]
-struct Master;
+pub struct Master;
 
 // The basic commands group is being defined here.
 // this group includes the commands that basically every bot has, nothing really special.
@@ -51,8 +52,6 @@ struct Meta;
     fact,
     why,
     eightball,
-    custom_commands,
-    self_roles,
     valorant,
     ship,
     pp,
@@ -133,10 +132,9 @@ struct Music;
 #[group("Configuration")]
 #[description = "All the configuration related commands.
 Basic usage:
-`config user VALUE DATA`
 `config guild VALUE DATA`"]
 #[prefixes("config", "configure")]
-#[commands(guild, user)]
+#[commands(guild)]
 struct Configuration;
 
 // This is a custom help command.
@@ -217,9 +215,10 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
 async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
     if let Some(guild_id) = msg.guild_id {
         let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        if let Ok(guild) = Guild::from_db(db, guild_id).await {
-            if guild.disabled_commands.contains(&cmd_name.to_string()) {
+        let db = data.get::<PoolContainer>().unwrap();
+
+        if let Ok(disabled_commands) = Guild::new(db, guild_id).get_disabled_commands().await {
+            if disabled_commands.contains(&cmd_name.to_string()) {
                 let _ = msg
                     .reply(
                         ctx,
@@ -238,48 +237,15 @@ async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
 // This function executes every time a command finishes executing.
 #[hook]
 async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResult) {
-    match &error {
-        Ok(_) => {
-            if cmd_name != "help" {
-                let data = ctx.data.read().await;
-                let db = data.get::<Database>().unwrap();
-                let mut stat = CommandStat::from_db(db, cmd_name.to_string())
-                    .await
-                    .unwrap_or(CommandStat::new(cmd_name.to_string()));
-                stat.increment_count();
-                if let Err(why) = stat.save_stat(db).await {
-                    error!(why)
-                }
-            }
-        }
-        Err(why) => {
-            error!("Error while running command {}", &cmd_name);
-            error!("{:?}", &error);
-            if let Err(_) = msg.reply(ctx, why).await {
-                error!(
-                    "Unable to send messages on channel id {}",
-                    &msg.channel_id.0
-                );
-            };
-        }
-    }
-}
-
-// Small error event that triggers when a command doesn't exist.
-// Incase its a guild specific custom command, it is triggered.
-#[hook]
-async fn unrecognised_command(ctx: &Context, msg: &Message, unrecognised_command_name: &str) {
-    if let Some(guild_id) = msg.guild_id {
-        let data = ctx.data.read().await;
-        let db = data.get::<Database>().unwrap();
-        if let Ok(guild) = Guild::from_db(db, guild_id).await {
-            for c in guild.custom_commands.iter() {
-                if c.name == unrecognised_command_name {
-                    let _ = msg.reply(ctx, &c.reply).await;
-                    break;
-                }
-            }
-        }
+    if let Err(why) = &error {
+        error!("Error while running command {}", &cmd_name);
+        error!("{:?}", &error);
+        if let Err(_) = msg.reply(ctx, why).await {
+            error!(
+                "Unable to send messages on channel id {}",
+                &msg.channel_id.0
+            );
+        };
     }
 }
 
@@ -311,7 +277,6 @@ pub async fn get_std_framework(owners: HashSet<UserId>, bot_id: UserId) -> Stand
         .bucket("reddit", |b| b.delay(5).time_span(5).limit(1))
         .await
         .on_dispatch_error(on_dispatch_error)
-        .unrecognised_command(unrecognised_command)
         .group(&META_GROUP)
         .group(&FUN_GROUP)
         .group(&GAMES_GROUP)

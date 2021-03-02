@@ -1,38 +1,34 @@
-use crate::{database::Guild, Database};
+use crate::{data::PoolContainer, database::HydrateReminder};
 use serenity::{
     framework::standard::{macros::command, CommandResult},
     model::channel::Message,
     prelude::Context,
 };
 
+async fn _cr_hydrate(ctx: &Context, msg: &Message, create: bool) -> CommandResult {
+    let data = ctx.data.read().await;
+    let db = data.get::<PoolContainer>().unwrap();
+    let hydrate_reminder = HydrateReminder::new(db);
+    let content = if create {
+        hydrate_reminder.insert(msg.author.id).await?;
+        "You are offically part of hydration now"
+    } else {
+        hydrate_reminder.delete(msg.author.id).await?;
+        "Hope to see you in hydration again, Bye!"
+    };
+    msg.reply(ctx, content)
+        .await?;
+    Ok(())
+}
+
 /// Add yourself to hydrate reminder.
 #[command("add")]
 async fn add_hydrate(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    Guild::from_db(db, guild_id)
-        .await?
-        .add_hydrate(msg.author.id)?
-        .save_guild(db)
-        .await?;
-    msg.reply(ctx, "You are offically part of hydration now")
-        .await?;
-    Ok(())
+    _cr_hydrate(ctx,msg,true).await
 }
 
 /// Remove yourself from hydrate reminder.
 #[command("remove")]
 async fn remove_hydrate(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    Guild::from_db(db, guild_id)
-        .await?
-        .remove_hydrate(msg.author.id)?
-        .save_guild(db)
-        .await?;
-    msg.reply(ctx, "Hope to see you in hydration again, Bye!")
-        .await?;
-    Ok(())
+    _cr_hydrate(ctx,msg,false).await
 }

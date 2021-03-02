@@ -1,7 +1,15 @@
-use crate::{database::Guild, utils::basic_functions::format_seconds, Database};
+use std::ops::Sub;
+
+use crate::{
+    constants::{DAILY_AMOUNT, GAMBLE_MULTIPLIERS, GAMBLE_WEIGHTS},
+    data::PoolContainer,
+    database::Guild,
+    utils::basic_functions::format_seconds,
+};
 use chrono::prelude::*;
-use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use rand::distributions::WeightedIndex;
+
+use comfy_table::{Cell, CellAlignment::Center, ContentArrangement::Dynamic, Table};
 use rand::prelude::*;
 use serenity::{
     framework::standard::{macros::command, Args, CommandResult},
@@ -15,11 +23,13 @@ async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let guild = Guild::from_db(db, guild_id).await?;
-    let member = guild.get_member(member_id)?;
-    msg.reply(ctx, format!("You have {} cowoins", member.coins))
-        .await?;
+    let db = data.get::<PoolContainer>().unwrap();
+    let content = match Guild::new(db, guild_id).get_member(member_id).await? {
+        Some(member) => format!("You have {} cowoins", member.coins),
+        None => format!("Could not find user with id: {}", member_id),
+    };
+    msg.reply(ctx, content).await?;
+
     Ok(())
 }
 
@@ -31,90 +41,102 @@ async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
 async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
-
     let mut coins = args.single::<i64>()?;
     if coins < 1 {
         msg.reply(ctx, "Can't gamble with given amount").await?;
+
         return Ok(());
     }
 
     let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let mut guild = Guild::from_db(db, guild_id).await?;
-    let mut member = guild.get_member(member_id)?;
-
-    if coins > member.coins {
-        msg.reply(ctx, "You don't have enough balance").await?;
-        return Ok(());
-    }
-
-    let multipliers = [0, 1, 2, 3, 4, 5];
-    let weights = [6.0, 2.0, 1.7, 0.2, 0.1];
-    let dist = WeightedIndex::new(&weights).unwrap();
-    let multiplier = multipliers[dist.sample(&mut thread_rng())];
-    if multiplier == 0 {
-        member.update_coins(coins * -1);
-    } else {
-        coins = coins * multiplier;
-        member.update_coins(coins);
-    }
-
-    let response = match multiplier {
-        0 => format!("You lost {} cowoins, try again next time", coins),
-        1 => format!("1x you gained {} cowoins", coins),
-        2 => format!("2x you gained {} cowoins", coins),
-        3 => format!("3x you gained {} cowoins", coins),
-        4 => format!("4x you gained {} cowoins", coins),
-        5 => format!("5x GODLIKE!!!! you gained {} cowoins", coins),
-        _ => {
-            msg.reply(ctx, "Something unexpected happned, try again later")
-                .await?;
+    let db = data.get::<PoolContainer>().unwrap();
+    let guild = Guild::new(db, guild_id);
+    if let Some(member) = guild.get_member(member_id).await? {
+        if coins > member.coins {
+            msg.reply(ctx, "You don't have enough balance").await?;
             return Ok(());
         }
-    };
-    guild.update_member(member.clone())?.save_guild(db).await?;
-    msg.reply(
-        ctx,
-        format!("{}\nYou have {} cowoins now", response, member.coins),
-    )
-    .await?;
+
+        let multipliers = *GAMBLE_MULTIPLIERS;
+        let weights = *GAMBLE_WEIGHTS;
+        let dist = WeightedIndex::new(&weights).unwrap();
+        let multiplier = multipliers[dist.sample(&mut thread_rng())];
+
+        let new_balance = match multiplier == 0 {
+            true => member.coins - coins,
+            false => {
+                coins = coins * multiplier;
+                member.coins + coins
+            }
+        };
+
+        let response = match multiplier {
+            0 => format!("You lost {} cowoins, try again next time", coins),
+            1 => format!("1x you gained {} cowoins", coins),
+            2 => format!("2x you gained {} cowoins", coins),
+            3 => format!("3x you gained {} cowoins", coins),
+            4 => format!("4x you gained {} cowoins", coins),
+            5 => format!("5x GODLIKE!!!! you gained {} cowoins", coins),
+            _ => {
+                msg.reply(ctx, "Something unexpected happned, try again later")
+                    .await?;
+                    
+                return Ok(());
+            }
+        };
+        guild
+            .set_member_economy(member_id, new_balance, None)
+            .await?;
+        msg.reply(
+            ctx,
+            format!("{}\nYou have {} cowoins now", response, new_balance),
+        )
+        .await?;
+    } else {
+        msg.reply(ctx, format!("Could not find user with id: {}", member_id))
+            .await?;
+    }
+
     Ok(())
 }
 
 /// Grab your daily cowoins.
 #[command]
 async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
-    let daily_const = 1000;
+    let daily_const = *DAILY_AMOUNT;
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let mut guild = Guild::from_db(db, guild_id).await?;
-    let mut member = guild.get_member(member_id)?;
-    let difference = Utc::now().timestamp() - member.last_daily;
-    if difference > 86400 {
-        member
-            .update_coins(daily_const)
-            .update_last_daily(Utc::now().timestamp());
-        guild.update_member(member.clone())?.save_guild(db).await?;
-        msg.reply(
-            ctx,
-            format!(
-                "You have redeemed your daily {} cowoins, your balance is {}",
-                daily_const, member.coins
-            ),
-        )
-        .await?;
-    } else {
-        msg.reply(
-            ctx,
-            format!(
-                "Wait another {} to redeem your daily cowoins",
-                format_seconds(86400 - difference as u64)
-            ),
-        )
-        .await?;
-    }
+    let db = data.get::<PoolContainer>().unwrap();
+    let guild = Guild::new(db, guild_id);
+    let content = {
+        match guild.get_member(member_id).await? {
+            Some(member) => {
+                let difference = Utc::now().sub(member.last_daily).num_seconds();
+                match difference > 86400 {
+                    true => {
+                        let new_balance = member.coins + daily_const;
+                        guild
+                            .set_member_economy(member_id, new_balance, Some(Utc::now()))
+                            .await?;
+                        format!(
+                            "You have redeemed your daily {} cowoins, your balance is {}",
+                            daily_const, new_balance
+                        )
+                    },
+                    false => format!(
+                        "Wait another {} to redeem your daily cowoins",
+                        format_seconds(86400 - difference as u64)
+                    )
+                }
+            }
+            None => {
+                format!("Could not find user with id: {}", member_id)
+            }
+        }
+    };
+    msg.reply(ctx, content).await?;
+
     Ok(())
 }
 
@@ -123,8 +145,8 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
 async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let db = data.get::<Database>().unwrap();
-    let mut members = Guild::from_db(db, guild_id).await?.members;
+    let db = data.get::<PoolContainer>().unwrap();
+    let mut members = Guild::new(db, guild_id).get_members().await?;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();
     table.set_content_arrangement(Dynamic).set_table_width(100);
@@ -134,7 +156,7 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
         Cell::new("Cowoins").set_alignment(Center),
     ]);
     members.sort_by(|a, b| b.coins.cmp(&a.coins));
-    for (i, member) in members.clone().iter().enumerate() {
+    for (i, member) in members.iter().enumerate() {
         let _member = ctx
             .http
             .get_member(*guild_id.as_u64(), member.id as u64)
@@ -154,5 +176,6 @@ async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
             })
         })
         .await?;
+
     Ok(())
 }

@@ -1,73 +1,37 @@
 mod commands;
 mod constants;
+mod data;
 mod database;
 mod framework;
 mod handler;
 mod service;
 mod utils;
 
+use data::*;
 use itconfig::*;
 use serenity::{
-    client::{
-        bridge::gateway::{GatewayIntents, ShardManager},
-        Client,
-    },
+    client::{bridge::gateway::GatewayIntents, Client},
     http::Http,
-    prelude::TypeMapKey,
 };
 use songbird::SerenityInit;
-use std::{
-    clone::Clone,
-    collections::{HashMap, HashSet},
-    sync::Arc,
+use sqlx::postgres::PgPoolOptions;
+use std::{clone::Clone, collections::HashSet};
+use tokio::{
+    signal::unix::{signal, SignalKind},
     time::Instant,
 };
-use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, instrument, Level};
-use tracing_log::LogTracer;
-use tracing_subscriber::FmtSubscriber;
-use wither::mongodb::{Client as MongoClient, Database as MongoDatabase};
-
-struct ShardManagerContainer; // Shard manager to use for the latency.
-struct Database; // The connection to the mongo database.
-struct Uptime; //  This is for the startup time of the bot.
-struct PrefixCache; //  This is for caching prefix.
-
-impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
-}
-
-impl TypeMapKey for Database {
-    type Value = MongoDatabase;
-}
-
-impl TypeMapKey for Uptime {
-    type Value = Instant;
-}
-
-impl TypeMapKey for PrefixCache {
-    type Value = Arc<RwLock<HashMap<i64, String>>>;
-}
+use tracing::{error, info};
+use tracing_log::env_logger;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main]
-#[instrument]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if *(constants::TRACING) {
-        LogTracer::init()?;
-        let base_level = *(constants::TRACE_LEVEL);
-        let level = match base_level {
-            "error" => Level::ERROR,
-            "warn" => Level::WARN,
-            "info" => Level::INFO,
-            "debug" => Level::DEBUG,
-            "trace" => Level::TRACE,
-            _ => Level::INFO,
-        };
-        info!("Tracer initialized");
-        let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
-        tracing::subscriber::set_global_default(subscriber)?;
-        info!("Subscriber initialized");
-    }
+async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(EnvFilter::from_default_env())
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+
     let bot_token = get_env::<String>("TOKEN").expect("env::TOKEN not set");
     let http = Http::new_with_token(&bot_token);
     let (owners, bot_id) = match http.get_current_application_info().await {
@@ -93,32 +57,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .register_songbird()
         .await?;
 
-    // Block to define global data.
-    // and so the data lock is not kept open in write mode.
+    let database_url = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
+    let pool = PgPoolOptions::new()
+        .max_connections(20)
+        .connect(&database_url)
+        .await?;
+
     {
-        // Open the data lock in write mode.
         let mut data = client.data.write().await;
-
-        // Add the database connection to the data.
-        {
-            let mongo_uri = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
-            let mongo_database = MongoClient::with_uri_str(&mongo_uri)
-                .await?
-                .database(*(constants::DATABASE));
-            data.insert::<Database>(mongo_database.clone());
-            info!("Database initialized");
-        }
-
-        // Add the shard manager to the data.
-        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
-
-        // Set current time as the uptime.
+        data.insert::<PoolContainer>(pool.clone());
+        data.insert::<ShardManagerContainer>(client.shard_manager.clone());
         data.insert::<Uptime>(Instant::now());
-
-        data.insert::<PrefixCache>(Arc::new(RwLock::new(HashMap::new())));
+        data.insert::<PrefixCache>(Default::default());
     }
 
-    // start listening for events by starting a single shard
+    let signal_kinds = vec![
+        SignalKind::hangup(),
+        SignalKind::interrupt(),
+        SignalKind::terminate(),
+    ];
+
+    for signal_kind in signal_kinds {
+        let mut stream = signal(signal_kind).unwrap();
+        let shard_manager = client.shard_manager.clone();
+        let pool = pool.clone();
+
+        tokio::spawn(async move {
+            stream.recv().await;
+            info!("Shutting down");
+            shard_manager.lock().await.shutdown_all().await;
+            info!("Closing database pool");
+            pool.close().await;
+            info!("Bye!!!");
+        });
+    }
+
     if let Err(why) = client.start_autosharded().await {
         error!("An error occurred while running the client: {:?}", why);
     }

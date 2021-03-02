@@ -27,31 +27,31 @@ fn _trivia_msg<S: Into<String>>(content: S, footer: Option<S>) -> CreateMessage<
 /// Trivia competition.
 ///
 /// Categories available:
-///     Any = 0 (default)
-///     GeneralKnowledge = 9
-///     EntertainmentBooks = 10
-///     EntertainmentFilm = 11
-///     EntertainmentMusic = 12
-///     EntertainmentMusicalsAndTheatres = 13
-///     EntertainmentTelevision = 14
-///     EntertainmentVideoGames = 15
-///     EntertainmentBoardGames = 16
-///     ScienceNature = 17
-///     ScienceComputers = 18
-///     ScienceMathematics = 19
-///     Mythology = 20
-///     Sports = 21
-///     Geography = 22
-///     History = 23
-///     Politics = 24
-///     Art = 25
-///     Celebrities = 26
-///     Animals = 27
-///     Vehicles = 28
-///     EntertainmentComics = 29
-///     ScienceGadgets = 30
-///     EntertainmentJapaneseAnimeAndManga = 31
-///     EntertainmentCartoonAndAnimations = 32
+///     Any
+///     GeneralKnowledge
+///     EntertainmentBooks
+///     EntertainmentFilm
+///     EntertainmentMusic
+///     EntertainmentMusicalsAndTheatres
+///     EntertainmentTelevision
+///     EntertainmentVideoGames
+///     EntertainmentBoardGames
+///     ScienceNature
+///     ScienceComputers
+///     ScienceMathematics
+///     Mythology
+///     Sports
+///     Geography
+///     History
+///     Politics
+///     Art
+///     Celebrities
+///     Animals
+///     Vehicles
+///     EntertainmentComics
+///     ScienceGadgets
+///     EntertainmentJapaneseAnimeAndManga
+///     EntertainmentCartoonAndAnimations
 ///
 /// Difficulty
 ///     Any
@@ -97,7 +97,7 @@ async fn trivia(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             m
         })
         .await?;
-    tokio::time::delay_for(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
     let mut scores: HashMap<UserId, usize> = HashMap::new();
     for clue in rs.results {
         let question = html_escape::decode_html_entities(&clue.question).to_string();
@@ -155,7 +155,7 @@ async fn trivia(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 })
                 .await?;
         }
-        tokio::time::delay_for(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
     quiz_channel
                 .send_message(&ctx, |m| {
@@ -165,7 +165,7 @@ async fn trivia(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     m
                 })
                 .await?;
-    tokio::time::delay_for(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
     quiz_channel.delete(&ctx).await?;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();

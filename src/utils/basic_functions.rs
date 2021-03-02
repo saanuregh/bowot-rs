@@ -1,6 +1,6 @@
 use crate::{ShardManagerContainer, Uptime};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use serenity::{client::bridge::gateway::ShardId, model::channel::Message, prelude::Context};
 use sysinfo::{get_current_pid, ProcessExt, RefreshKind, System, SystemExt};
 use tokio::time::Instant;
@@ -163,18 +163,5 @@ pub async fn get_meta_info(ctx: &Context) -> MetaInfoResult {
         num_guilds,
         num_priv_channels,
         num_shards,
-    }
-}
-
-pub fn merge_json(a: &mut Value, b: &Value) {
-    match (a, b) {
-        (&mut Value::Object(ref mut a), &Value::Object(ref b)) => {
-            for (k, v) in b {
-                merge_json(a.entry(k.clone()).or_insert(Value::Null), v);
-            }
-        }
-        (a, b) => {
-            *a = b.clone();
-        }
     }
 }

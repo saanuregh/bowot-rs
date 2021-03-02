@@ -4,9 +4,8 @@ use regex::Regex;
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::{collections::HashMap, error::Error, str::FromStr};
-
-pub type ApiError = Box<dyn Error + Send + Sync>;
+use std::collections::HashMap;
+use strum_macros::{EnumString, ToString};
 
 lazy_static! {
     static ref CLIENT: Client = Client::builder().gzip(true).brotli(true).build().unwrap();
@@ -44,7 +43,7 @@ pub struct Update {
     pub updated_at: String,
 }
 
-pub async fn get_valorant_status() -> Result<ValorantStatus, ApiError> {
+pub async fn get_valorant_status() -> anyhow::Result<ValorantStatus> {
     Ok(CLIENT
         .get(Url::parse("https://riotstatus.vercel.app/valorant")?)
         .send()
@@ -52,40 +51,6 @@ pub async fn get_valorant_status() -> Result<ValorantStatus, ApiError> {
         .json::<Vec<ValorantStatus>>()
         .await?[0]
         .clone())
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Lyrics {
-    pub title: String,
-    pub author: String,
-    pub lyrics: String,
-    pub thumbnail: Thumbnail,
-    pub links: Links,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Thumbnail {
-    pub genius: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Links {
-    pub genius: String,
-}
-
-pub async fn get_lyrics<S: Into<String>>(title: S) -> Result<Lyrics, ApiError> {
-    Ok(CLIENT
-        .get(Url::parse_with_params(
-            "https://some-random-api.ml/lyrics",
-            &[("title", title.into())],
-        )?)
-        .send()
-        .await?
-        .json::<Lyrics>()
-        .await?)
 }
 
 // Structs used to deserialize the output of the urban dictionary api call.
@@ -106,7 +71,7 @@ pub struct UrbanList {
     pub list: Vec<UrbanDict>,
 }
 
-pub async fn urban_dict<S: Into<String>>(term: S) -> Result<UrbanList, ApiError> {
+pub async fn urban_dict<S: Into<String>>(term: S) -> anyhow::Result<UrbanList> {
     Ok(CLIENT
         .get(Url::parse_with_params(
             "http://api.urbandictionary.com/v0/define",
@@ -144,7 +109,7 @@ pub struct Definition {
 pub async fn define_term<S: Into<String>>(
     word: S,
     lang: S,
-) -> Result<Vec<DictionaryElement>, ApiError> {
+) -> anyhow::Result<Vec<DictionaryElement>> {
     Ok(CLIENT
         .get(
             Url::parse("https://api.dictionaryapi.dev/api/v2/entries/")?
@@ -164,7 +129,7 @@ pub struct ChuckResponse {
     pub value: Option<String>,
 }
 
-pub async fn get_chuck() -> Result<ChuckResponse, ApiError> {
+pub async fn get_chuck() -> anyhow::Result<ChuckResponse> {
     Ok(CLIENT
         .get(Url::parse("https://api.chucknorris.io/jokes/random")?)
         .send()
@@ -176,7 +141,7 @@ pub async fn get_chuck() -> Result<ChuckResponse, ApiError> {
 pub async fn neko_api<S: Into<String>>(
     endpoint: S,
     img: bool,
-) -> Result<HashMap<String, String>, ApiError> {
+) -> anyhow::Result<HashMap<String, String>> {
     let mut url = Url::parse("https://nekos.life/api/v2/")?;
     if img {
         url = url.join("img/")?;
@@ -190,7 +155,7 @@ pub async fn neko_api<S: Into<String>>(
         .await?)
 }
 
-pub async fn get_translate<S: Into<String>>(target: S, text: S) -> Result<String, ApiError> {
+pub async fn get_translate<S: Into<String>>(target: S, text: S) -> anyhow::Result<String> {
     Ok(CLIENT
         .get(Url::parse_with_params(
             "https://translate.googleapis.com/translate_a/single",
@@ -235,73 +200,36 @@ pub struct TriviaResult {
     pub incorrect_answers: Vec<String>,
 }
 
-#[derive(Copy, Clone, Deserialize, Debug)]
+#[derive(Copy, Clone, Deserialize, Debug, EnumString)]
 pub enum TriviaCategory {
-    Any = 0,
-    GeneralKnowledge = 9,
-    EntertainmentBooks = 10,
-    EntertainmentFilm = 11,
-    EntertainmentMusic = 12,
-    EntertainmentMusicalsAndTheatres = 13,
-    EntertainmentTelevision = 14,
-    EntertainmentVideoGames = 15,
-    EntertainmentBoardGames = 16,
-    ScienceNature = 17,
-    ScienceComputers = 18,
-    ScienceMathematics = 19,
-    Mythology = 20,
-    Sports = 21,
-    Geography = 22,
-    History = 23,
-    Politics = 24,
-    Art = 25,
-    Celebrities = 26,
-    Animals = 27,
-    Vehicles = 28,
-    EntertainmentComics = 29,
-    ScienceGadgets = 30,
-    EntertainmentJapaneseAnimeAndManga = 31,
-    EntertainmentCartoonAndAnimations = 32,
+    Any,
+    GeneralKnowledge,
+    EntertainmentBooks,
+    EntertainmentFilm,
+    EntertainmentMusic,
+    EntertainmentMusicalsAndTheatres,
+    EntertainmentTelevision,
+    EntertainmentVideoGames,
+    EntertainmentBoardGames,
+    ScienceNature,
+    ScienceComputers,
+    ScienceMathematics,
+    Mythology,
+    Sports,
+    Geography,
+    History,
+    Politics,
+    Art,
+    Celebrities,
+    Animals,
+    Vehicles,
+    EntertainmentComics,
+    ScienceGadgets,
+    EntertainmentJapaneseAnimeAndManga,
+    EntertainmentCartoonAndAnimations,
 }
 
-impl FromStr for TriviaCategory {
-    type Err = ApiError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let i = s.parse::<usize>()?;
-        Ok(match i {
-            0 => TriviaCategory::Any,
-            9 => TriviaCategory::GeneralKnowledge,
-            10 => TriviaCategory::EntertainmentBooks,
-            11 => TriviaCategory::EntertainmentFilm,
-            12 => TriviaCategory::EntertainmentMusic,
-            13 => TriviaCategory::EntertainmentMusicalsAndTheatres,
-            14 => TriviaCategory::EntertainmentTelevision,
-            15 => TriviaCategory::EntertainmentVideoGames,
-            16 => TriviaCategory::EntertainmentBoardGames,
-            17 => TriviaCategory::ScienceNature,
-            18 => TriviaCategory::ScienceComputers,
-            19 => TriviaCategory::ScienceMathematics,
-            20 => TriviaCategory::Mythology,
-            21 => TriviaCategory::Sports,
-            22 => TriviaCategory::Geography,
-            23 => TriviaCategory::History,
-            24 => TriviaCategory::Politics,
-            25 => TriviaCategory::Art,
-            26 => TriviaCategory::Celebrities,
-            27 => TriviaCategory::Animals,
-            28 => TriviaCategory::Vehicles,
-            29 => TriviaCategory::EntertainmentComics,
-            30 => TriviaCategory::ScienceGadgets,
-            31 => TriviaCategory::EntertainmentJapaneseAnimeAndManga,
-            32 => TriviaCategory::EntertainmentCartoonAndAnimations,
-            _ => {
-                return Err("Invalid digit".into());
-            }
-        })
-    }
-}
-#[derive(Copy, Clone, Deserialize, Debug)]
+#[derive(Copy, Clone, Deserialize, Debug, EnumString, ToString)]
 pub enum TriviaDifficulty {
     Any,
     Easy,
@@ -309,44 +237,21 @@ pub enum TriviaDifficulty {
     Hard,
 }
 
-impl FromStr for TriviaDifficulty {
-    type Err = ApiError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
-            "any" => TriviaDifficulty::Any,
-            "easy" => TriviaDifficulty::Easy,
-            "medium" => TriviaDifficulty::Medium,
-            "hard" => TriviaDifficulty::Hard,
-            _ => {
-                return Err("Parse error".into());
-            }
-        })
-    }
-}
-
-impl TriviaDifficulty {
-    pub fn value(&self) -> &str {
-        match *self {
-            TriviaDifficulty::Any => "0",
-            TriviaDifficulty::Easy => "easy",
-            TriviaDifficulty::Medium => "medium",
-            TriviaDifficulty::Hard => "hard",
-        }
-    }
-}
-
 pub async fn get_trivia(
     amount: usize,
     category: TriviaCategory,
     difficulty: TriviaDifficulty,
-) -> Result<TriviaResponse, ApiError> {
+) -> anyhow::Result<TriviaResponse> {
+    let mut difficulty_str: String = difficulty.to_string().to_lowercase();
+    if difficulty_str.contains("any") {
+        difficulty_str = "0".to_string();
+    }
     Ok(CLIENT
         .get("https://opentdb.com/api.php")
         .query(&[
             ("amount", amount.to_string()),
             ("category", (category as u8).to_string()),
-            ("difficulty", difficulty.value().to_string()),
+            ("difficulty", difficulty_str),
         ])
         .send()
         .await?
@@ -384,10 +289,7 @@ struct RedditResponse {
 }
 
 // Gets a random post from a vector of subreddit.
-pub async fn reddit_random_post(
-    subreddits: Vec<&str>,
-    image: bool,
-) -> Result<RedditPost, ApiError> {
+pub async fn reddit_random_post(subreddits: Vec<&str>, image: bool) -> anyhow::Result<RedditPost> {
     let subreddit = subreddits.choose(&mut thread_rng()).unwrap();
     let url = Url::parse(&format!(
         r"https://www.reddit.com/r/{}/hot/.json?sort=top&t=week&limit=25",
@@ -402,7 +304,7 @@ pub async fn reddit_random_post(
         .await?;
     let posts = data.data.children;
     let mut rng = thread_rng();
-    let mut idx: i64 = rng.gen_range(0, data.data.dist);
+    let mut idx: i64 = rng.gen_range(0..data.data.dist);
     let mut post: RedditPost;
     for _ in 0..10 {
         post = posts[idx as usize].data.clone();
@@ -417,105 +319,12 @@ pub async fn reddit_random_post(
                 }
             }
         }
-        idx = rng.gen_range(0, data.data.dist);
+        idx = rng.gen_range(0..data.data.dist);
     }
-    Err("No result found".into())
+    Err(anyhow::anyhow!("No result found"))
 }
 
-#[derive(Debug, Deserialize)]
-struct Artist {
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpotifyTrack {
-    artists: Vec<Artist>,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Item {
-    track: SpotifyTrack,
-}
-
-#[derive(Debug, Deserialize)]
-struct Tracks {
-    items: Vec<Item>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpotifyData {
-    name: String,
-    tracks: Tracks,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SpotifyToken {
-    client_id: String,
-    access_token: String,
-    access_token_expiration_timestamp_ms: i64,
-    is_anonymous: bool,
-}
-
-async fn spotify_get_access_token<S: Into<String>>(spotify_url: S) -> Result<String, ApiError> {
-    Ok(CLIENT
-        .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0",
-        )
-        .header(
-            "Accept",
-            "application/json",
-        )
-        .header("Accept-Language", "en")
-        .header("app-platform", "WebPlayer")
-        .header("spotify-app-version", "1.1.50.23.gb3574ed3")
-        .header("DNT", "1")
-        .header("Connection", "keep-alive")
-        .header("Cookie", "sp_t=7965d077939bf34fc3e922d08601ec9b; sp_landing=https%3A%2F%2Fopen.spotify.com%2Fplaylist%2F7FK4Xae9oH4IdTCAZ2otdT")
-        .header("TE", "Trailers")
-        .header("Referer", spotify_url.into().clone())
-        .send().await?.json::<SpotifyToken>().await?.access_token)
-}
-
-pub async fn get_spotify_tracks<S: Into<String> + Copy + std::fmt::Debug>(
-    spotify_url: S,
-) -> Result<(String, Vec<String>), ApiError> {
-    let access_token = spotify_get_access_token(spotify_url.into().clone()).await?;
-    let playlist_id = spotify_url
-        .into()
-        .strip_prefix("https://open.spotify.com/playlist/")
-        .unwrap()
-        .to_string();
-    let spotify_data = CLIENT
-        .get(Url::parse(&format!(
-            "https://api.spotify.com/v1/playlists/{}?type=track%2Cepisode&market=US",
-            playlist_id
-        ))?)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0",
-        )
-        .header("Accept", "application/json")
-        .header("Accept-Language", "en")
-        .header("Referer", "https://open.spotify.com/")
-        .bearer_auth(access_token)
-        .send()
-        .await?
-        .json::<SpotifyData>()
-        .await?;
-    let tracks: Vec<String> = spotify_data
-        .tracks
-        .items
-        .iter()
-        .map(|t| format!("{} - {}", t.track.artists[0].name, t.track.name))
-        .collect();
-    return Ok((spotify_data.name, tracks));
-}
-
-pub async fn generate_triggered_avatar<S: Into<String>>(avatar: S) -> Result<Vec<u8>, ApiError> {
+pub async fn generate_triggered_avatar<S: Into<String>>(avatar: S) -> anyhow::Result<Vec<u8>> {
     Ok(CLIENT
         .get("https://some-random-api.ml/canvas/triggered")
         .query(&[("avatar", avatar.into())])
