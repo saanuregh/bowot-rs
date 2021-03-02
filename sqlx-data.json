@@ -1,0 +1,402 @@
+{
+  "db": "PostgreSQL",
+  "0b72ff8cda811bdfb0ea2897614d492432e7dff890aee9f5d91be46dd6f844a7": {
+    "query": "\n            SELECT disabled_commands\n            FROM guilds\n            WHERE id = $1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "disabled_commands",
+          "type_info": "TextArray"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "1036041468d08ae7268d26d00f64b99fbd5cbac796876efb830b5da7ae26582d": {
+    "query": "\n            INSERT INTO members\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT DO NOTHING\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8",
+          "Timestamptz"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "2253df1f835d5a54cc8a5fb655b69a107c35a99ae8559dd438e874e02558816e": {
+    "query": "\n            SELECT id, last_daily, coins, guild_id\n            FROM members\n            WHERE guild_id = $1 AND id = $2\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "last_daily",
+          "type_info": "Timestamptz"
+        },
+        {
+          "ordinal": 2,
+          "name": "coins",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 3,
+          "name": "guild_id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "24c89aa21e96be8f190532ba011b03ca6ae87c326dcdd272c1a591c4eb5fb336": {
+    "query": "\n            INSERT INTO hydrate_reminders\n            VALUES ($1)\n            ON CONFLICT DO NOTHING\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "266b6638ca7f20e55774c32e190b69eaed41202019595fcee8db3ce2f0af6c3d": {
+    "query": "\n            INSERT INTO triggers\n            VALUES ($1, $2, $3)\n            ON CONFLICT DO NOTHING\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Text",
+          "Text",
+          "Int8"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "2ada5dfc5c0a874868771713fe670871b9978f59314282d0550fb89c11954772": {
+    "query": "\n            SELECT id, last_daily, coins, guild_id\n            FROM members\n            WHERE guild_id = $1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "last_daily",
+          "type_info": "Timestamptz"
+        },
+        {
+          "ordinal": 2,
+          "name": "coins",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 3,
+          "name": "guild_id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "40e62f02a5a2c9933283e38b34394a17f75d1cda03b06eede1331a1837dabb28": {
+    "query": "\n            DELETE FROM guilds\n            WHERE id = $1\n            RETURNING id\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "43dc2a2a82f5eb2eb527e0b187f302ca6c4b012406687e1ba666fa326922dc58": {
+    "query": "\n            UPDATE guilds\n            SET prefix = $2\n            WHERE id = $1 \n            RETURNING prefix \n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "prefix",
+          "type_info": "Varchar"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Varchar"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "49254adaf0bde58fbb7b124759f96a87e5375803f3ea5e04059cb170e572db78": {
+    "query": "\n            DELETE FROM triggers\n            WHERE guild_id = $1 AND phrase = $2\n            RETURNING phrase\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "phrase",
+          "type_info": "Text"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Text"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "523b5db364ae4971b4dfe82db6e6b82375d0437365728e5573e5c5f93babf921": {
+    "query": "\n            DELETE FROM members\n            WHERE id = $1 AND guild_id = $2\n            RETURNING id\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "5a3a3d8c0b9a89f393247b4908efdcbc99d3cbd71019a4a99f2884ae6b66f46a": {
+    "query": "\n            SELECT prefix\n            FROM guilds\n            WHERE id = $1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "prefix",
+          "type_info": "Varchar"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "8118924719e5551a6c0b2cc13a51aef942874c5f9e93c91b60881d9716b8ad9c": {
+    "query": "\n            DELETE FROM hydrate_reminders\n            WHERE id = $1\n            RETURNING id\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "8d9ca2cc1d7f98b780a3588ade5264f109f978871678dd946aacc11d7adf089f": {
+    "query": "\n                    UPDATE members\n                    SET coins = $3, last_daily = $4\n                    WHERE guild_id = $1 AND id = $2\n                    ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8",
+          "Timestamptz"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "8f918e0fb93dd068138f7530c8849fa720048842a3d82c2e3b716ed3c95857e0": {
+    "query": "\n            SELECT phrase, reply, guild_id\n            FROM triggers\n            WHERE guild_id = $1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "phrase",
+          "type_info": "Text"
+        },
+        {
+          "ordinal": 1,
+          "name": "reply",
+          "type_info": "Text"
+        },
+        {
+          "ordinal": 2,
+          "name": "guild_id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "9b62be5d2ad92a1e7e802048d8ba010787fde7d93fe01b5962d83676e4d65873": {
+    "query": "\n            INSERT INTO guilds\n            VALUES ($1, $2, $3)\n            ON CONFLICT DO NOTHING\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Varchar",
+          "TextArray"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "9cd4555f7c2c3ed42e0f8208865a376f8314944289ffd3ba25534c522bbde2c8": {
+    "query": "\n            SELECT id\n            FROM hydrate_reminders\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": []
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "b54068144d3fe4816082562263e2c2f97a1c3186c44662eaa3bf7c93475f7924": {
+    "query": "\n                    UPDATE members\n                    SET coins = $3\n                    WHERE guild_id = $1 AND id = $2\n                    ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      },
+      "nullable": []
+    }
+  },
+  "be1aa92e0390fe7ff8d41f8c1821d4246e0b83e888e09ce5030c46151901ef2f": {
+    "query": "\n        SELECT id, prefix\n        FROM guilds\n        ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "prefix",
+          "type_info": "Varchar"
+        }
+      ],
+      "parameters": {
+        "Left": []
+      },
+      "nullable": [
+        false,
+        false
+      ]
+    }
+  },
+  "e2265d7574e417e2adcbd6c655be9a0be9d1ceb32aa2c3e43e0cda5ec2ee0c71": {
+    "query": "\n            UPDATE guilds\n            SET disabled_commands = $2\n            WHERE id = $1\n            RETURNING disabled_commands \n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "disabled_commands",
+          "type_info": "TextArray"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8",
+          "TextArray"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  }
+}

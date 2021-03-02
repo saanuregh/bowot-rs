@@ -3,6 +3,8 @@ WORKDIR /app
 RUN mkdir src
 COPY Cargo.toml ./
 COPY src ./src/
+COPY sqlx-data.json ./
+ENV SQLX_OFFLINE true
 RUN cargo build --release
 
 FROM alpine:latest

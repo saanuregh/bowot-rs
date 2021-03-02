@@ -28,11 +28,9 @@ jobs:
         run: |
           cargo install --version=0.5.1 sqlx-cli --no-default-features --features postgres
           SKIP_DOCKER=true ./scripts/init_db.sh
-      - uses: akhileshns/heroku-deploy@v3.7.8
+      - uses: akhileshns/heroku-deploy@v3.12.12
         with:
           heroku_api_key: ${{secrets.HEROKU_API_KEY}}
           heroku_app_name: ${{secrets.HEROKU_APP_NAME}}
           heroku_email: ${{secrets.HEROKU_EMAIL}}
           usedocker: true
-        env:
-          HD_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
