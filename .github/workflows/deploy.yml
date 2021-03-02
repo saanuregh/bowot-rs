@@ -26,4 +26,4 @@ jobs:
           heroku_email: ${{secrets.HEROKU_EMAIL}}
           usedocker: true
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          HD_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
