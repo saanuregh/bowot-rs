@@ -1,5 +1,5 @@
 use crate::{
-    constants::{HYDRATE, STATUSES},
+    constants::{HYDRATE, PORT, STATUSES},
     data::PoolContainer,
     database::{get_all_guild_prefix, HydrateReminder},
     PrefixCache,
@@ -12,6 +12,13 @@ use serenity::{
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::{error, info};
+use warp::Filter;
+
+async fn routes() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    let health = warp::path("health").map(|| "OK");
+    let index = warp::get().map(|| "OK");
+    health.or(index)
+}
 
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
@@ -91,5 +98,8 @@ pub async fn start_services(ctx: Arc<Context>) {
             tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone3)));
             tokio::time::sleep(Duration::from_secs(2700)).await;
         }
+    });
+    tokio::spawn(async move {
+        warp::serve(routes().await).run(([0, 0, 0, 0], *PORT)).await;
     });
 }
