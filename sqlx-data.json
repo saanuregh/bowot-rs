@@ -35,6 +35,24 @@
       "nullable": []
     }
   },
+  "1f105672484b16ffea016dbaa94e0745df0151acd064e503a3a8560b14671f8a": {
+    "query": "\n        SELECT id\n        FROM guilds\n        ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": []
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
   "2253df1f835d5a54cc8a5fb655b69a107c35a99ae8559dd438e874e02558816e": {
     "query": "\n            SELECT id, last_daily, coins, guild_id\n            FROM members\n            WHERE guild_id = $1 AND id = $2\n            ",
     "describe": {
@@ -352,30 +370,6 @@
         ]
       },
       "nullable": []
-    }
-  },
-  "be1aa92e0390fe7ff8d41f8c1821d4246e0b83e888e09ce5030c46151901ef2f": {
-    "query": "\n        SELECT id, prefix\n        FROM guilds\n        ",
-    "describe": {
-      "columns": [
-        {
-          "ordinal": 0,
-          "name": "id",
-          "type_info": "Int8"
-        },
-        {
-          "ordinal": 1,
-          "name": "prefix",
-          "type_info": "Varchar"
-        }
-      ],
-      "parameters": {
-        "Left": []
-      },
-      "nullable": [
-        false,
-        false
-      ]
     }
   },
   "e2265d7574e417e2adcbd6c655be9a0be9d1ceb32aa2c3e43e0cda5ec2ee0c71": {
