@@ -42,13 +42,19 @@ async fn sheesh(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Sound cache was installed at startup.");
     let sources = sources_lock.lock().await;
     let sheesh_keys: Vec<&String> = sources.keys().filter(|x| x.contains("sheesh")).collect();
+    let mut success = false;
     if let Some(chosen_sheesh) = sheesh_keys.choose(&mut rand::thread_rng()) {
         if let Some(source) = sources.get(chosen_sheesh.clone()) {
             handler.play_source(source.new_handle().into());
-            return Ok(());
+            success = true
         }
     }
-    msg.reply(ctx, "Sheesh missing!!! AAAAAAAAAAAAAAAAAAAAAAAAA!")
-        .await?;
+    if !success {
+        msg.reply(ctx, "Sheesh missing!!! AAAAAAAAAAAAAAAAAAAAAAAAA!")
+            .await?;
+        return Ok(());
+    }
+
+    msg.react(ctx, '✅').await?;
     Ok(())
 }
