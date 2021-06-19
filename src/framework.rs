@@ -1,7 +1,7 @@
 use crate::{
     commands::{
         configuration::*, economy::*, fun::*, games::*, hydrate::*, meta::*, moderation::*,
-        music::*, reddit::*, roleplay::*,
+        music::*, reddit::*, roleplay::*, soundboard::*,
     },
     constants::DEFAULT_PREFIX,
     data::PoolContainer,
@@ -123,9 +123,16 @@ struct Hydrate;
     remove,
     now_playing,
     // lyrics
-    lofi
+    lofi,
 )]
 struct Music;
+
+// The soundboard command group.
+#[group("Soundboard")]
+#[description = "Soundboard commands."]
+#[only_in("guilds")]
+#[commands(sheesh)]
+struct Soundboard;
 
 // The configuration command.
 // Technically a group, but it only has a single command.
@@ -284,6 +291,7 @@ pub async fn get_std_framework(owners: HashSet<UserId>, bot_id: UserId) -> Stand
         .group(&ECONOMY_GROUP)
         .group(&REDDIT_GROUP)
         .group(&MUSIC_GROUP)
+        .group(&SOUNDBOARD_GROUP)
         .group(&MOD_GROUP)
         .group(&HYDRATE_GROUP)
         .group(&CONFIGURATION_GROUP)

@@ -5,17 +5,22 @@ mod database;
 mod framework;
 mod handler;
 mod service;
+mod soundboard;
 mod utils;
+mod voice;
 
 use data::*;
 use itconfig::*;
 use serenity::{
     client::{bridge::gateway::GatewayIntents, Client},
     http::Http,
+    prelude::Mutex,
 };
 use songbird::SerenityInit;
+
+use soundboard::init_sound_store;
 use sqlx::postgres::PgPoolOptions;
-use std::{clone::Clone, collections::HashSet};
+use std::{clone::Clone, collections::HashSet, sync::Arc};
 use tokio::{
     signal::unix::{signal, SignalKind},
     time::Instant,
@@ -69,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         data.insert::<ShardManagerContainer>(client.shard_manager.clone());
         data.insert::<Uptime>(Instant::now());
         data.insert::<PrefixCache>(Default::default());
+        data.insert::<SoundStore>(Arc::new(Mutex::new(init_sound_store().await)));
     }
 
     let signal_kinds = vec![

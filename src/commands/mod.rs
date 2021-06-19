@@ -8,3 +8,4 @@ pub mod moderation;
 pub mod music;
 pub mod reddit;
 pub mod roleplay;
+pub mod soundboard;

@@ -1,7 +1,8 @@
 use serenity::{
-    client::{bridge::gateway::ShardManager},
+    client::bridge::gateway::ShardManager,
     prelude::{Mutex, RwLock, TypeMapKey},
 };
+use songbird::input::cached::Compressed;
 use sqlx::PgPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::Instant;
@@ -26,4 +27,10 @@ pub struct PrefixCache;
 
 impl TypeMapKey for PrefixCache {
     type Value = Arc<RwLock<HashMap<i64, String>>>;
+}
+
+pub struct SoundStore;
+
+impl TypeMapKey for SoundStore {
+    type Value = Arc<Mutex<HashMap<String, Compressed>>>;
 }

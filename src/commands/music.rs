@@ -1,28 +1,21 @@
-use crate::utils::{
-    basic_functions::{format_seconds, shorten},
-    ytdl::{ytdl_info, YoutubeDlOutput},
+use crate::{
+    utils::{
+        basic_functions::shorten,
+        ytdl::{ytdl_info, YoutubeDlOutput},
+    },
+    voice::{format_duration, get_now_playing_embed, join_voice_channel},
 };
 use rand::Rng;
 use serenity::{
-    async_trait,
-    builder::CreateMessage,
     client::Context,
     framework::standard::{macros::command, Args, CommandResult, Delimiter},
-    http::Http,
-    model::{channel::Message, id::GuildId, prelude::ChannelId},
-    prelude::Mutex,
+    model::channel::Message,
 };
 use songbird::{
-    input::Metadata,
     input::{ytdl, Input},
-    Call, Event, EventContext, EventHandler as VoiceEventHandler, SongbirdKey, TrackEvent,
-};
-use std::{
-    sync::atomic::Ordering,
-    sync::{atomic::AtomicUsize, Arc},
+    SongbirdKey,
 };
 use strum_macros::{EnumString, ToString};
-use tokio::time::Duration;
 use tracing::error;
 
 const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
@@ -31,123 +24,11 @@ const NOTIN_VC_MSG: &str = "Not in a voice channel";
 const NOTHING_PLAYING: &str = "Nothing playing";
 const MAX_PLAYLIST: usize = 25;
 
-struct TrackEndNotifier {
-    chan_id: ChannelId,
-    http: Arc<Http>,
-    handler_lock: Arc<Mutex<Call>>,
-}
-
-#[async_trait]
-impl VoiceEventHandler for TrackEndNotifier {
-    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
-        if let EventContext::Track(_track_list) = ctx {
-            let handler = self.handler_lock.lock().await;
-            if let Some(np) = handler.queue().current() {
-                let metadata = np.metadata();
-                if let Err(why) = self
-                    .chan_id
-                    .send_message(&self.http, |m| {
-                        _now_playing_embed(m, metadata.clone());
-                        m
-                    })
-                    .await
-                {
-                    error!("Error sending message: {:?}", why);
-                }
-            } else {
-                if let Err(why) = self.chan_id.say(&self.http, "Queue finished").await {
-                    error!("Error sending message: {:?}", why);
-                }
-            }
-        }
-
-        None
-    }
-}
-
-struct ChannelIdleChecker {
-    ctx: Arc<Context>,
-    guild_id: GuildId,
-    elapsed: AtomicUsize,
-}
-
-#[async_trait]
-impl VoiceEventHandler for ChannelIdleChecker {
-    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        let data = self.ctx.data.read().await;
-        if let Some(manager) = data.get::<SongbirdKey>() {
-            if let Some(handler_lock) = manager.get(self.guild_id) {
-                let queue_empty = {
-                    let handler = handler_lock.lock().await;
-                    handler.queue().is_empty()
-                };
-                if queue_empty {
-                    if (self.elapsed.fetch_add(1, Ordering::Relaxed) + 1) > 2 {
-                        let _ = manager.remove(self.guild_id).await;
-
-                        return Some(Event::Cancel);
-                    }
-                } else {
-                    self.elapsed.store(0, Ordering::Relaxed);
-                }
-
-                return None;
-            }
-        }
-        error!("Something error happened in channel idle checking, canceling handler");
-
-        Some(Event::Cancel)
-    }
-}
-
-async fn _join(ctx: &Context, msg: &Message) -> Option<Arc<Mutex<Call>>> {
-    let guild = msg.guild(&ctx.cache).await.unwrap();
-    if let Some(connect_to) = guild
-        .voice_states
-        .get(&msg.author.id)
-        .and_then(|voice_state| voice_state.channel_id)
-    {
-        let data = ctx.data.read().await;
-        let manager = data
-            .get::<SongbirdKey>()
-            .expect("Expected Songbird in TypeMap");
-        let (handler_lock, success) = manager.join(guild.id, connect_to).await;
-        if let Err(why) = success {
-            error!("Error while joining voice channel: {:?}", why);
-
-            return None;
-        }
-        {
-            let mut handler = handler_lock.lock().await;
-            handler.add_global_event(
-                Event::Track(TrackEvent::End),
-                TrackEndNotifier {
-                    chan_id: msg.channel_id,
-                    http: ctx.http.clone(),
-                    handler_lock: handler_lock.clone(),
-                },
-            );
-            handler.add_global_event(
-                Event::Periodic(Duration::from_secs(60), None),
-                ChannelIdleChecker {
-                    ctx: Arc::new(ctx.clone()),
-                    guild_id: guild.id,
-                    elapsed: Default::default(),
-                },
-            );
-        }
-
-        return Some(handler_lock);
-    }
-
-    None
-}
-
 /// Joins me to the voice channel you are currently on.
 #[command]
 #[aliases("connect")]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    if _join(ctx, msg).await.is_some() {
+    if join_voice_channel(ctx, msg).await.is_some() {
         msg.react(ctx, '✅').await?;
     } else {
         msg.reply(ctx, NOTIN_VC_MSG).await?;
@@ -195,7 +76,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .expect("Expected Songbird in TypeMap");
     let handler_lock = match manager.get(guild_id) {
         Some(hl) => hl,
-        None => match _join(ctx, msg).await {
+        None => match join_voice_channel(ctx, msg).await {
             Some(hl) => hl,
             None => {
                 msg.reply(ctx, NOTIN_VC_MSG).await?;
@@ -248,7 +129,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             msg.channel_id
                 .send_message(ctx, |m| {
                     m.reference_message(msg);
-                    _now_playing_embed(m, metadata);
+                    get_now_playing_embed(m, metadata);
                     m
                 })
                 .await?;
@@ -258,7 +139,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                 format!(
                     "__**Queued:**__  `{}` | `{}`",
                     metadata.title.unwrap(),
-                    _duration_format(metadata.duration)
+                    format_duration(metadata.duration)
                 ),
             )
             .await?;
@@ -312,7 +193,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             queue_str += &format!(
                 "__**Now playing:**__\n```yaml\n{} | {}\n```",
                 shorten(&metadata.title.clone().unwrap(), 40),
-                _duration_format(metadata.duration)
+                format_duration(metadata.duration)
             );
             if queue.len() > 1 {
                 queue_str += "\n__**Queue:**__\n```yaml\n";
@@ -322,7 +203,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
                         "{}: {} | {}\n",
                         index + 1,
                         shorten(&metadata.title.clone().unwrap(), 40),
-                        _duration_format(metadata.duration)
+                        format_duration(metadata.duration)
                     );
                 }
                 if queue.len() > 10 {
@@ -496,7 +377,7 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
             msg.channel_id
                 .send_message(ctx, |m| {
                     m.reference_message(msg);
-                    _now_playing_embed(m, metadata.clone());
+                    get_now_playing_embed(m, metadata.clone());
                     m
                 })
                 .await?;
@@ -592,19 +473,37 @@ enum LofiStation {
     ChilledCow,
     #[strum(serialize = "https://youtu.be/DWcJFNfaw9c", serialize = "ChilledCow2")]
     ChilledCow2,
-    #[strum(serialize = "https://youtu.be/5yx6BWlEVcY", serialize = "ChillHopMusic")]
+    #[strum(
+        serialize = "https://youtu.be/5yx6BWlEVcY",
+        serialize = "ChillHopMusic"
+    )]
     ChillHopMusic,
-    #[strum(serialize = "https://youtu.be/7NOSDKb0HlU", serialize = "ChillHopMusic2")]
+    #[strum(
+        serialize = "https://youtu.be/7NOSDKb0HlU",
+        serialize = "ChillHopMusic2"
+    )]
     ChillHopMusic2,
-    #[strum(serialize = "https://youtu.be/WBfbkPTqUtU", serialize = "TokyoLostTracks")]
+    #[strum(
+        serialize = "https://youtu.be/WBfbkPTqUtU",
+        serialize = "TokyoLostTracks"
+    )]
     TokyoLostTracks,
-    #[strum(serialize = "https://youtu.be/OVPPOwMpSpQ", serialize = "TheJazzhopCafe")]
+    #[strum(
+        serialize = "https://youtu.be/OVPPOwMpSpQ",
+        serialize = "TheJazzhopCafe"
+    )]
     TheJazzhopCafe,
-    #[strum(serialize = "https://youtu.be/ZYMuB9y549s", serialize = "HomeworkRadio")]
+    #[strum(
+        serialize = "https://youtu.be/ZYMuB9y549s",
+        serialize = "HomeworkRadio"
+    )]
     HomeworkRadio,
     #[strum(serialize = "https://youtu.be/-5KAN9_CzSA", serialize = "SteezyAsFuck")]
     SteezyAsFuck,
-    #[strum(serialize = "https://youtu.be/l7TxwBhtTUY", serialize = "TheBootLegBoy")]
+    #[strum(
+        serialize = "https://youtu.be/l7TxwBhtTUY",
+        serialize = "TheBootLegBoy"
+    )]
     TheBootLegBoy,
     #[strum(serialize = "https://youtu.be/B8tQ8RUbTW8", serialize = "InYourChill")]
     InYourChill,
@@ -656,29 +555,4 @@ async fn lofi(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     Ok(())
-}
-
-fn _now_playing_embed(m: &mut CreateMessage, np: Metadata) {
-    m.embed(|e| {
-        e.title("Now playing");
-        e.field("Title", np.title.clone().unwrap(), false);
-        if let Some(t) = np.source_url {
-            e.field("URL", t, false);
-        }
-        e.field("Duration", _duration_format(np.duration), true);
-        // e.field("Requester", np.requester.mention(), true);
-        if let Some(t) = np.thumbnail {
-            e.thumbnail(t);
-        }
-        e
-    });
-}
-
-fn _duration_format(duration: Option<Duration>) -> String {
-    if let Some(d) = duration {
-        if d != Duration::default() {
-            return format_seconds(d.as_secs());
-        }
-    }
-    "Live".to_string()
 }
