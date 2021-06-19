@@ -4,9 +4,7 @@ use crate::{
         music::*, reddit::*, roleplay::*, soundboard::*,
     },
     constants::DEFAULT_PREFIX,
-    data::PoolContainer,
-    database::Guild,
-    PrefixCache,
+    GuildCacheStore,
 };
 
 use serenity::{
@@ -222,17 +220,20 @@ async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
 async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
     if let Some(guild_id) = msg.guild_id {
         let data = ctx.data.read().await;
-        let db = data.get::<PoolContainer>().unwrap();
-
-        if let Ok(disabled_commands) = Guild::new(db, guild_id).get_disabled_commands().await {
-            if disabled_commands.contains(&cmd_name.to_string()) {
-                let _ = msg
-                    .reply(
-                        ctx,
-                        "This command has been disabled by an administrtor of this guild.",
-                    )
-                    .await;
-                return false;
+        if let Some(guild_cache_map) = data.get::<GuildCacheStore>() {
+            if let Some(guild_cache) = guild_cache_map.get(guild_id) {
+                if guild_cache
+                    .disabled_commands
+                    .contains(&cmd_name.to_string())
+                {
+                    let _ = msg
+                        .reply(
+                            ctx,
+                            "This command has been disabled by an administrtor of this guild.",
+                        )
+                        .await;
+                    return false;
+                }
             }
         }
     }
@@ -261,9 +262,10 @@ async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResul
 async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     let data = ctx.data.read().await;
     if let Some(id) = msg.guild_id {
-        let prefix_cache = data.get::<PrefixCache>().unwrap().read().await;
-        if let Some(p) = prefix_cache.get(&(id.0 as i64)) {
-            return Some(p.clone());
+        if let Some(guild_cache_map) = data.get::<GuildCacheStore>() {
+            if let Some(guild_cache) = guild_cache_map.get(id.0 as i64) {
+                return Some(guild_cache.prefix.clone());
+            }
         }
     }
     Some(DEFAULT_PREFIX.clone())

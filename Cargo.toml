@@ -8,13 +8,13 @@ chrono = "0.4"
 comfy-table = "2.1"
 fasteval = "0.2"
 futures = "0.3"
-qrcode = { version = "0.12", default-features = false }
-rand = { version = "0.8", features = ["getrandom"] }
+qrcode = { version="0.12", default-features=false }
+rand = { version="0.8", features=["getrandom"] }
 regex = "1.4"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli"] }
-serde = { version = "1.0", features = ["derive"] }
+reqwest = { version="0.11", default-features=false, features=["json", "rustls-tls", "gzip", "brotli"] }
+serde = { version="1.0", features=["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.2", features = [
+tokio = { version="1.2", features=[
 	"macros",
 	"rt-multi-thread",
 	"io-std",
@@ -23,19 +23,20 @@ tokio = { version = "1.2", features = [
 	"time",
 ] }
 tracing = "0.1"
-tracing-log = { version = "0.1", features = ["env_logger"] }
+tracing-log = { version="0.1", features=["env_logger"] }
 tracing-subscriber = "0.2"
 itconfig = "1.0"
 lazy_static = "1.4"
 strsim = "0.10"
 html-escape = "0.2"
 sysinfo = "0.16"
-audiopus_sys = { version = "0.1", features = ["static"] }
-sqlx = { version = "0.5", features = ["runtime-tokio-rustls", "postgres", "chrono", "offline"] }
+audiopus_sys = { version="0.1", features=["static"] }
+sqlx = { version="0.5", features=["runtime-tokio-rustls", "postgres", "chrono", "offline"] }
 anyhow = "1.0"
 strum = "0.20"
 strum_macros = "0.20"
-warp =  { version = "0.3.0", default-features = false, features = [] }
+warp = { version="0.3.0", default-features=false, features=[] }
+dashmap = { version="4.0.2", features=["serde"] }
 
 [dependencies.serenity]
 # git = "https://github.com/serenity-rs/serenity"

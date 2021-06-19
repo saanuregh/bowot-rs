@@ -1,4 +1,4 @@
-use crate::{data::SoundStore, voice::join_voice_channel};
+use crate::{data::SoundStore, soundboard::get_all_keys, voice::join_voice_channel};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serenity::{
@@ -36,12 +36,11 @@ async fn sheesh(ctx: &Context, msg: &Message) -> CommandResult {
         },
     };
     let mut handler = handler_lock.lock().await;
-    let sources_lock = data
+    let sources = data
         .get::<SoundStore>()
-        .cloned()
         .expect("Sound cache was installed at startup.");
-    let sources = sources_lock.lock().await;
-    let sheesh_keys: Vec<&String> = sources.keys().filter(|x| x.contains("sheesh")).collect();
+    let all_keys = get_all_keys(&sources);
+    let sheesh_keys: Vec<&String> = all_keys.iter().filter(|k| k.contains("sheesh")).collect();
     let mut success = false;
     if let Some(chosen_sheesh) = sheesh_keys.choose(&mut rand::thread_rng()) {
         if let Some(source) = sources.get(chosen_sheesh.clone()) {

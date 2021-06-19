@@ -275,17 +275,17 @@ impl<'a> Guild<'a> {
     }
 }
 
-pub async fn get_all_guild_prefix(pool: &PgPool) -> anyhow::Result<Vec<(i64, String)>> {
+pub async fn get_all_guild_ids(pool: &PgPool) -> anyhow::Result<Vec<i64>> {
     Ok(query!(
         r#"
-        SELECT id, prefix
+        SELECT id
         FROM guilds
         "#
     )
     .fetch_all(pool)
     .await?
     .iter()
-    .map(|row| (row.id, row.prefix.clone()))
+    .map(|row| row.id)
     .collect())
 }
 

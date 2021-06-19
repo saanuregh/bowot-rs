@@ -1,4 +1,8 @@
-use crate::{data::PoolContainer, database::Guild, service::start_services};
+use crate::{
+    data::{GuildCacheStore, PoolContainer},
+    database::Guild,
+    service::start_services,
+};
 use regex::Regex;
 use serenity::{
     async_trait,
@@ -38,14 +42,15 @@ impl EventHandler for Handler {
         // Trigger phrase detection and handling.
         if let Some(guild_id) = msg.guild_id {
             let data = ctx.data.read().await;
-            let db = data.get::<PoolContainer>().unwrap();
-            if let Ok(triggers) = Guild::new(db, guild_id).get_triggers().await {
-                for trigger_phrase in triggers {
-                    let re =
-                        Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase)).unwrap();
-                    if re.is_match(&msg.content) {
-                        if let Err(_) = msg.reply(&ctx, &trigger_phrase.reply).await {
-                            error!("Error sending trigger message")
+            if let Some(guild_cache_map) = data.get::<GuildCacheStore>() {
+                if let Some(guild_cache) = guild_cache_map.get(guild_id) {
+                    for trigger_phrase in &guild_cache.triggers {
+                        let re = Regex::new(&format!(r"(\s+|^){}(\s+|$)", &trigger_phrase.phrase))
+                            .unwrap();
+                        if re.is_match(&msg.content) {
+                            if let Err(_) = msg.reply(&ctx, &trigger_phrase.reply).await {
+                                error!("Error sending trigger message")
+                            }
                         }
                     }
                 }
@@ -73,6 +78,11 @@ impl EventHandler for Handler {
             error!("error adding guild to db {:?}", why);
             return;
         };
+        let guild_cache_store = data
+            .get::<GuildCacheStore>()
+            .expect("Expected GuildCacheStore to be in TypeMap");
+        guild_cache_store.update(db, guild_id).await;
+
         if let Ok(db_members) = db_guild.get_members().await {
             let db_member_ids: Vec<i64> = db_members.iter().map(|m| m.id).collect();
             for id in non_bot_members {

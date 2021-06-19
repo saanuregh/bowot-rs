@@ -1,10 +1,12 @@
+use crate::cache::GuildCacheMap;
+use dashmap::DashMap;
 use serenity::{
     client::bridge::gateway::ShardManager,
-    prelude::{Mutex, RwLock, TypeMapKey},
+    prelude::{Mutex, TypeMapKey},
 };
 use songbird::input::cached::Compressed;
 use sqlx::PgPool;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::time::Instant;
 
 pub struct ShardManagerContainer;
@@ -23,14 +25,14 @@ pub struct Uptime;
 impl TypeMapKey for Uptime {
     type Value = Instant;
 }
-pub struct PrefixCache;
+pub struct GuildCacheStore;
 
-impl TypeMapKey for PrefixCache {
-    type Value = Arc<RwLock<HashMap<i64, String>>>;
+impl TypeMapKey for GuildCacheStore {
+    type Value = Arc<GuildCacheMap>;
 }
 
 pub struct SoundStore;
 
 impl TypeMapKey for SoundStore {
-    type Value = Arc<Mutex<HashMap<String, Compressed>>>;
+    type Value = Arc<DashMap<String, Compressed>>;
 }

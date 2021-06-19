@@ -1,11 +1,12 @@
+use dashmap::DashMap;
 use songbird::{
     input::{cached::Compressed, ffmpeg},
     Bitrate,
 };
-use std::{collections::HashMap, fs::read_dir, path::PathBuf};
+use std::{fs::read_dir, path::PathBuf};
 use tracing::info;
 
-pub type AudioMap = HashMap<String, Compressed>;
+pub type AudioMap = DashMap<String, Compressed>;
 
 const SOUNDS_DIR: &str = "sounds";
 
@@ -28,7 +29,7 @@ pub async fn get_compressed_source_from_path(path: PathBuf) -> Option<(String, C
 }
 
 pub async fn init_sound_store() -> AudioMap {
-    let mut audio_map: AudioMap = HashMap::new();
+    let audio_map: AudioMap = DashMap::new();
     if let Ok(paths) = read_dir(SOUNDS_DIR) {
         for dir_entry_result in paths {
             if let Ok(dir_entry) = dir_entry_result {
@@ -44,6 +45,10 @@ pub async fn init_sound_store() -> AudioMap {
             }
         }
     }
-    info!("Cached {} audio files", audio_map.keys().len());
+    info!("Cached {} audio files", audio_map.len());
     audio_map
+}
+
+pub fn get_all_keys(sources: &AudioMap) -> Vec<String> {
+    sources.clone().into_iter().map(|(k, _)| k).collect()
 }

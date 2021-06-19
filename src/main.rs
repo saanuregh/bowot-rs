@@ -1,3 +1,4 @@
+mod cache;
 mod commands;
 mod constants;
 mod data;
@@ -14,7 +15,6 @@ use itconfig::*;
 use serenity::{
     client::{bridge::gateway::GatewayIntents, Client},
     http::Http,
-    prelude::Mutex,
 };
 use songbird::SerenityInit;
 
@@ -73,8 +73,8 @@ async fn main() -> anyhow::Result<()> {
         data.insert::<PoolContainer>(pool.clone());
         data.insert::<ShardManagerContainer>(client.shard_manager.clone());
         data.insert::<Uptime>(Instant::now());
-        data.insert::<PrefixCache>(Default::default());
-        data.insert::<SoundStore>(Arc::new(Mutex::new(init_sound_store().await)));
+        data.insert::<GuildCacheStore>(Arc::new(Default::default()));
+        data.insert::<SoundStore>(Arc::new(init_sound_store().await));
     }
 
     let signal_kinds = vec![

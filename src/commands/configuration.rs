@@ -1,5 +1,5 @@
 use crate::{
-    data::{PoolContainer, PrefixCache},
+    data::{GuildCacheStore, PoolContainer},
     database::Guild,
     framework::MASTER_GROUP,
 };
@@ -32,6 +32,19 @@ async fn guild(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
     Ok(())
 }
 
+async fn _update_guild_cache_store(ctx: &Context, guild_id: impl Into<i64>) -> anyhow::Result<()> {
+    let data = ctx.data.read().await;
+    let db = data
+        .get::<PoolContainer>()
+        .expect("Expected DBPool to be in TypeMap");
+    let guild_cache_store = data
+        .get::<GuildCacheStore>()
+        .expect("Expected GuildCacheStore to be in TypeMap");
+    guild_cache_store.update(db, guild_id).await;
+
+    Ok(())
+}
+
 /// Change the command prefix on this guild.
 ///
 /// Usage: `config guild prefix !`
@@ -43,8 +56,7 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let data = ctx.data.read().await;
     let db = data.get::<PoolContainer>().unwrap();
     Guild::new(db, guild_id).set_prefix(prefix).await?;
-    let mut prefix_cache = data.get::<PrefixCache>().unwrap().write().await;
-    prefix_cache.insert(guild_id.0 as i64, prefix.to_string());
+    _update_guild_cache_store(ctx, guild_id).await?;
     msg.reply(
         ctx,
         format!("Successfully changed your prefix to `{}`", prefix),
@@ -73,6 +85,7 @@ async fn _cr_trigger_phrase(
         db_guild.delete_trigger(phrase.clone()).await?;
         format!("Successfully removed trigger phrase `{}`", phrase)
     };
+    _update_guild_cache_store(ctx, guild_id).await?;
     msg.reply(ctx, content).await?;
 
     Ok(())
@@ -129,6 +142,7 @@ async fn _change_command_status_command(
             content = format!("Command `{}` successfully disabled", command_name);
         }
         db_guild.set_disabled_commands(disabled_commands).await?;
+        _update_guild_cache_store(ctx, guild_id).await?;
     }
     msg.reply(ctx, content).await?;
 

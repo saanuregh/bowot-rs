@@ -1,8 +1,7 @@
 use crate::{
     constants::{HYDRATE, PORT, STATUSES},
     data::PoolContainer,
-    database::{get_all_guild_prefix, HydrateReminder},
-    PrefixCache,
+    database::HydrateReminder,
 };
 use rand::seq::SliceRandom;
 use serenity::{
@@ -64,38 +63,18 @@ async fn status_update(ctx: Arc<Context>) {
         .await;
     info!("Status update done");
 }
-
-async fn cache_prefix(ctx: Arc<Context>) {
-    let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
-    let mut prefix_cache = data.get::<PrefixCache>().unwrap().write().await;
-    if let Ok(guilds) = get_all_guild_prefix(db).await {
-        for (id, prefix) in guilds {
-            prefix_cache.insert(id, prefix);
-        }
-    }
-    info!("Caching prefix done");
-}
-
 pub async fn start_services(ctx: Arc<Context>) {
     let ctx_clone1 = Arc::clone(&ctx);
     let ctx_clone2 = Arc::clone(&ctx);
-    let ctx_clone3 = Arc::clone(&ctx);
     tokio::spawn(async move {
         loop {
-            tokio::join!(cache_prefix(Arc::clone(&ctx_clone1)));
-            tokio::time::sleep(Duration::from_secs(900)).await;
-        }
-    });
-    tokio::spawn(async move {
-        loop {
-            tokio::join!(status_update(Arc::clone(&ctx_clone2)));
+            tokio::join!(status_update(Arc::clone(&ctx_clone1)));
             tokio::time::sleep(Duration::from_secs(1800)).await;
         }
     });
     tokio::spawn(async move {
         loop {
-            tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone3)));
+            tokio::join!(hydrate_reminder(Arc::clone(&ctx_clone2)));
             tokio::time::sleep(Duration::from_secs(2700)).await;
         }
     });
