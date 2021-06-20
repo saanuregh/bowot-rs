@@ -37,6 +37,7 @@ strum = "0.20"
 strum_macros = "0.20"
 warp = { version="0.3.0", default-features=false, features=[] }
 dashmap = { version="4.0.2", features=["serde"] }
+mimalloc = "0.1"
 
 [dependencies.serenity]
 # git = "https://github.com/serenity-rs/serenity"

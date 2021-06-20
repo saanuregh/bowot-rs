@@ -28,6 +28,10 @@ use tokio::{
 use tracing::{error, info};
 use tracing_log::env_logger;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
