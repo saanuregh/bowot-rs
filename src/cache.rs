@@ -1,5 +1,6 @@
 use dashmap::{mapref::one::Ref, DashMap};
 use sqlx::PgPool;
+use tracing::info;
 
 use crate::database::{Guild, Trigger};
 
@@ -57,6 +58,7 @@ impl GuildCacheMap {
             guild_cache.update_cache(pool).await;
         }
         self.insert(pool, guild_id).await;
+        info!("Cache for guild {} updated", guild_id);
     }
 }
 

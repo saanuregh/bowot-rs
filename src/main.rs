@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let std_framework = framework::get_std_framework(owners, bot_id).await;
 
     let mut client = Client::builder(&bot_token)
-        .event_handler(handler::Handler)
+        .event_handler(handler::Handler::new())
         .framework(std_framework)
         .intents({
             let mut intents = GatewayIntents::all();

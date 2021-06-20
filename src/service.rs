@@ -63,6 +63,7 @@ async fn status_update(ctx: Arc<Context>) {
         .await;
     info!("Status update done");
 }
+
 pub async fn start_services(ctx: Arc<Context>) {
     let ctx_clone1 = Arc::clone(&ctx);
     let ctx_clone2 = Arc::clone(&ctx);
@@ -80,5 +81,6 @@ pub async fn start_services(ctx: Arc<Context>) {
     });
     tokio::spawn(async move {
         warp::serve(routes().await).run(([0, 0, 0, 0], *PORT)).await;
+        info!("Server started");
     });
 }

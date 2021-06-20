@@ -14,10 +14,26 @@ use serenity::{
     },
     prelude::{Context, EventHandler},
 };
-use std::{clone::Clone, sync::Arc};
+use std::{
+    clone::Clone,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tracing::{error, info};
 
-pub struct Handler;
+pub struct Handler {
+    is_services_running: AtomicBool,
+}
+
+impl Handler {
+    pub fn new() -> Self {
+        Self {
+            is_services_running: AtomicBool::new(false),
+        }
+    }
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -28,8 +44,11 @@ impl EventHandler for Handler {
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
         let ctx = Arc::new(ctx.clone());
         if *(crate::constants::ENABLE_SERVICES) {
-            info!("Starting services");
-            tokio::join!(start_services(ctx));
+            if !self.is_services_running.load(Ordering::Relaxed) {
+                start_services(ctx).await;
+                self.is_services_running.swap(true, Ordering::Relaxed);
+                info!("Services started");
+            }
         }
     }
 
