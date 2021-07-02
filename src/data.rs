@@ -1,4 +1,5 @@
 use crate::cache::GuildCacheMap;
+use bb8_redis::{bb8::Pool, RedisConnectionManager};
 use dashmap::DashMap;
 use serenity::{
     client::bridge::gateway::ShardManager,
@@ -14,9 +15,9 @@ impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
 
-pub struct PoolContainer;
+pub struct PgPoolContainer;
 
-impl TypeMapKey for PoolContainer {
+impl TypeMapKey for PgPoolContainer {
     type Value = PgPool;
 }
 
@@ -35,4 +36,10 @@ pub struct SoundStore;
 
 impl TypeMapKey for SoundStore {
     type Value = Arc<DashMap<String, Compressed>>;
+}
+
+pub struct RedisPoolContainer;
+
+impl TypeMapKey for RedisPoolContainer {
+    type Value = Pool<RedisConnectionManager>;
 }

@@ -1,5 +1,5 @@
 use crate::{
-    data::{GuildCacheStore, PoolContainer},
+    data::{GuildCacheStore, PgPoolContainer},
     database::Guild,
     service::start_services,
 };
@@ -85,7 +85,7 @@ impl EventHandler for Handler {
     async fn guild_create(&self, ctx: Context, guild: DiscordGuild, _flag: bool) {
         let guild_id = guild.id;
         let data = ctx.data.read().await;
-        let db = data.get::<PoolContainer>().unwrap();
+        let db = data.get::<PgPoolContainer>().unwrap();
         let non_bot_members: Vec<i64> = guild
             .members
             .into_iter()
@@ -119,7 +119,7 @@ impl EventHandler for Handler {
         if !new_member.user.bot {
             let member_id = new_member.user.id;
             let data = ctx.data.read().await;
-            let db = data.get::<PoolContainer>().unwrap();
+            let db = data.get::<PgPoolContainer>().unwrap();
             let db_guild = Guild::new(db, guild_id);
             if let Ok(member) = db_guild.get_member(member_id).await {
                 if member.is_none() {

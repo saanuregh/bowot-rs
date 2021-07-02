@@ -9,7 +9,9 @@ mod service;
 mod soundboard;
 mod utils;
 mod voice;
+mod ytdl_cache;
 
+use bb8_redis::{bb8, RedisConnectionManager};
 use data::*;
 use itconfig::*;
 use serenity::{
@@ -18,9 +20,10 @@ use serenity::{
 };
 use songbird::SerenityInit;
 
+use mimalloc::MiMalloc;
 use soundboard::init_sound_store;
 use sqlx::postgres::PgPoolOptions;
-use std::{clone::Clone, collections::HashSet, sync::Arc};
+use std::{clone::Clone, collections::HashSet, sync::Arc, time::Duration};
 use tokio::{
     signal::unix::{signal, SignalKind},
     time::Instant,
@@ -28,7 +31,6 @@ use tokio::{
 use tracing::{error, info};
 use tracing_log::env_logger;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
-use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -67,14 +69,22 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     let database_url = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
-    let pool = PgPoolOptions::new()
+    let db_pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
         .await?;
 
+    let redis_url = get_env::<String>("REDIS_URL").expect("env::REDIS_URL not set");
+    let redis_manager = RedisConnectionManager::new(redis_url)?;
+    let redis_pool = bb8::Pool::builder()
+        .connection_timeout(Duration::from_secs(5))
+        .build(redis_manager)
+        .await?;
+
     {
         let mut data = client.data.write().await;
-        data.insert::<PoolContainer>(pool.clone());
+        data.insert::<PgPoolContainer>(db_pool.clone());
+        data.insert::<RedisPoolContainer>(redis_pool.clone());
         data.insert::<ShardManagerContainer>(client.shard_manager.clone());
         data.insert::<Uptime>(Instant::now());
         data.insert::<GuildCacheStore>(Arc::new(Default::default()));
@@ -90,14 +100,17 @@ async fn main() -> anyhow::Result<()> {
     for signal_kind in signal_kinds {
         let mut stream = signal(signal_kind).unwrap();
         let shard_manager = client.shard_manager.clone();
-        let pool = pool.clone();
+        let db_pool = db_pool.clone();
+        let redis_pool = db_pool.clone();
 
         tokio::spawn(async move {
             stream.recv().await;
             info!("Shutting down");
             shard_manager.lock().await.shutdown_all().await;
             info!("Closing database pool");
-            pool.close().await;
+            db_pool.close().await;
+            info!("Closing redis pool");
+            redis_pool.close().await;
             info!("Bye!!!");
         });
     }

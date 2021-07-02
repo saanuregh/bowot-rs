@@ -1,9 +1,11 @@
 use crate::{
+    data::RedisPoolContainer,
     utils::{
         basic_functions::shorten,
         ytdl::{ytdl_info, YoutubeDlOutput},
     },
     voice::{format_duration, get_now_playing_embed, join_voice_channel},
+    ytdl_cache::YtdlCache,
 };
 use rand::Rng;
 use serenity::{
@@ -16,7 +18,7 @@ use songbird::{
     SongbirdKey,
 };
 use strum_macros::{EnumString, ToString};
-use tracing::error;
+use tracing::{error, info};
 
 const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
 const QUEUE_EMPTY_MSG: &str = "The queue is empty";
@@ -57,6 +59,31 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
+async fn _ytdl_push_into_source(sources: &mut Vec<Input>, result: YoutubeDlOutput) {
+    match result {
+        YoutubeDlOutput::Playlist(p) => {
+            if let Some(playlist) = p.entries {
+                for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
+                    match ytdl(&s.webpage_url.clone().unwrap()).await {
+                        Ok(mut source) => {
+                            source.metadata.title = Some(s.title);
+                            sources.push(source)
+                        }
+                        Err(why) => error!("Err starting source: {:?}", why),
+                    }
+                }
+            }
+        }
+        YoutubeDlOutput::SingleVideo(s) => match ytdl(&s.webpage_url.clone().unwrap()).await {
+            Ok(mut source) => {
+                source.metadata.title = Some(s.title);
+                sources.push(source)
+            }
+            Err(why) => error!("Err starting source: {:?}", why),
+        },
+    }
+}
+
 /// Adds a song to the queue.
 ///
 /// Usage: `play starmachine2000`
@@ -86,31 +113,39 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         },
     };
     let loading_msg = msg.reply(ctx, "Loading...").await?;
+    let redis_con = data
+        .get::<RedisPoolContainer>()
+        .expect("Expected RedisPoolContainer in TypeMap");
     let mut sources: Vec<Input> = Vec::new();
-    if let Ok(result) = ytdl_info(query, None).await {
-        match result {
-            YoutubeDlOutput::Playlist(p) => {
-                if let Some(playlist) = p.entries {
-                    for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
-                        match ytdl(&format!("https://www.youtube.com/watch?v={}", s.id)).await {
-                            Ok(mut source) => {
-                                source.metadata.title = Some(s.title);
-                                sources.push(source)
-                            }
-                            Err(why) => error!("Err starting source: {:?}", why),
-                        }
-                    }
-                }
+    let mut cache_hit = false;
+    match YtdlCache::new(redis_con.clone(), query.clone(), None)
+        .get()
+        .await
+    {
+        Ok(result) => {
+            cache_hit = true;
+            info!("ytdl cache hit for {}", query);
+            _ytdl_push_into_source(&mut sources, result).await;
+        }
+        Err(err) => error!("error fetching cache for query:{}\n{:?}", query, err),
+    }
+
+    if !cache_hit {
+        match ytdl_info(query.clone(), None).await {
+            Ok(result) => {
+                info!("ytdl cache miss for {}", query);
+                _ytdl_push_into_source(&mut sources, result.clone()).await;
+                if let Err(err) = YtdlCache::new(redis_con.clone(), query.clone(), Some(result))
+                    .set()
+                    .await
+                {
+                    error!("error caching query:{}\n{:?}", query, err)
+                };
             }
-            YoutubeDlOutput::SingleVideo(s) => match ytdl(&s.webpage_url.clone().unwrap()).await {
-                Ok(mut source) => {
-                    source.metadata.title = Some(s.title);
-                    sources.push(source)
-                }
-                Err(why) => error!("Err starting source: {:?}", why),
-            },
+            Err(err) => error!("error fetching query:{}\n{:?}", query, err),
         }
     }
+
     let _ = loading_msg.delete(ctx).await;
     if sources.is_empty() {
         msg.reply(ctx, "Couldn't find any result for the query")

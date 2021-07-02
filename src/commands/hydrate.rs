@@ -1,4 +1,4 @@
-use crate::{data::PoolContainer, database::HydrateReminder};
+use crate::{data::PgPoolContainer, database::HydrateReminder};
 use serenity::{
     framework::standard::{macros::command, CommandResult},
     model::channel::Message,
@@ -7,7 +7,7 @@ use serenity::{
 
 async fn _cr_hydrate(ctx: &Context, msg: &Message, create: bool) -> CommandResult {
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let hydrate_reminder = HydrateReminder::new(db);
     let content = if create {
         hydrate_reminder.insert(msg.author.id).await?;

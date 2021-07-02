@@ -1,5 +1,5 @@
 use crate::{
-    data::{GuildCacheStore, PoolContainer},
+    data::{GuildCacheStore, PgPoolContainer},
     database::Guild,
     framework::MASTER_GROUP,
 };
@@ -35,7 +35,7 @@ async fn guild(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
 async fn _update_guild_cache_store(ctx: &Context, guild_id: impl Into<i64>) -> anyhow::Result<()> {
     let data = ctx.data.read().await;
     let db = data
-        .get::<PoolContainer>()
+        .get::<PgPoolContainer>()
         .expect("Expected DBPool to be in TypeMap");
     let guild_cache_store = data
         .get::<GuildCacheStore>()
@@ -54,7 +54,7 @@ async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let prefix = args.message();
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     Guild::new(db, guild_id).set_prefix(prefix).await?;
     _update_guild_cache_store(ctx, guild_id).await?;
     msg.reply(
@@ -76,7 +76,7 @@ async fn _cr_trigger_phrase(
     let phrase = args.single::<String>()?;
     let reply = args.rest().to_string();
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let db_guild = Guild::new(db, guild_id);
     let content = if create {
         db_guild.insert_trigger(phrase.clone(), reply).await?;
@@ -129,7 +129,7 @@ async fn _change_command_status_command(
     if command_exist {
         let guild_id = msg.guild_id.unwrap();
         let data = ctx.data.read().await;
-        let db = data.get::<PoolContainer>().unwrap();
+        let db = data.get::<PgPoolContainer>().unwrap();
         let db_guild = Guild::new(db, guild_id);
         let mut disabled_commands = db_guild.get_disabled_commands().await?;
         if enable {

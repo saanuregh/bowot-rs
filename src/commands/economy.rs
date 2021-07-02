@@ -2,7 +2,7 @@ use std::ops::Sub;
 
 use crate::{
     constants::{DAILY_AMOUNT, GAMBLE_MULTIPLIERS, GAMBLE_WEIGHTS},
-    data::PoolContainer,
+    data::PgPoolContainer,
     database::Guild,
     utils::basic_functions::format_seconds,
 };
@@ -23,7 +23,7 @@ async fn balance(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let content = match Guild::new(db, guild_id).get_member(member_id).await? {
         Some(member) => format!("You have {} cowoins", member.coins),
         None => format!("Could not find user with id: {}", member_id),
@@ -49,7 +49,7 @@ async fn gamble(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let guild = Guild::new(db, guild_id);
     if let Some(member) = guild.get_member(member_id).await? {
         if coins > member.coins {
@@ -107,7 +107,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let member_id = msg.author.id;
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let guild = Guild::new(db, guild_id);
     let content = {
         match guild.get_member(member_id).await? {
@@ -145,7 +145,7 @@ async fn daily(ctx: &Context, msg: &Message) -> CommandResult {
 async fn leaderboard(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild_id.unwrap();
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     let mut members = Guild::new(db, guild_id).get_members().await?;
     let mut table = Table::new();
     table.force_no_tty().enforce_styling();

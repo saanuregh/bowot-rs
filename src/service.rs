@@ -1,6 +1,6 @@
 use crate::{
     constants::{HYDRATE, PORT, STATUSES},
-    data::PoolContainer,
+    data::PgPoolContainer,
     database::HydrateReminder,
 };
 use rand::seq::SliceRandom;
@@ -22,7 +22,7 @@ async fn routes() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejec
 async fn hydrate_reminder(ctx: Arc<Context>) {
     let client = ctx.http.clone();
     let data = ctx.data.read().await;
-    let db = data.get::<PoolContainer>().unwrap();
+    let db = data.get::<PgPoolContainer>().unwrap();
     if let Ok(members) = HydrateReminder::new(db).get_all().await {
         for u in members.iter() {
             let user_id = *u as u64;

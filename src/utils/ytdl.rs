@@ -17,6 +17,7 @@ pub struct Playlist {
     pub uploader_url: Option<String>,
     pub webpage_url: Option<String>,
     pub webpage_url_basename: Option<String>,
+    pub _type: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -27,7 +28,6 @@ pub struct SingleVideo {
     pub channel: Option<String>,
     pub channel_id: Option<String>,
     pub channel_url: Option<String>,
-    pub description: Option<String>,
     pub duration: Option<Value>,
     pub ext: Option<String>,
     pub extractor: Option<String>,
@@ -42,9 +42,10 @@ pub struct SingleVideo {
     pub uploader: Option<String>,
     pub uploader_id: Option<String>,
     pub uploader_url: Option<String>,
-    pub url: Option<String>,
     pub view_count: Option<i64>,
     pub webpage_url: Option<String>,
+    // pub description: Option<String>,
+    // pub url: Option<String>,
 }
 
 /// Data returned by `YoutubeDl::run`. Output can either be a single video or a playlist of videos.
@@ -90,16 +91,19 @@ pub async fn ytdl_info(
     };
     if exit_code.success() {
         let value: Value = serde_json::from_reader(stdout.as_slice())?;
-
-        let is_playlist = value["_type"] == json!("playlist");
-        if is_playlist {
-            let playlist: Playlist = serde_json::from_value(value)?;
-            Ok(YoutubeDlOutput::Playlist(Box::new(playlist)))
-        } else {
-            let video: SingleVideo = serde_json::from_value(value)?;
-            Ok(YoutubeDlOutput::SingleVideo(Box::new(video)))
-        }
+        serde_value_to_ytdl(value)
     } else {
         Err(anyhow::anyhow!("Error fetching query"))
+    }
+}
+
+pub fn serde_value_to_ytdl(value: Value) -> anyhow::Result<YoutubeDlOutput> {
+    let is_playlist = value["_type"] == json!("playlist");
+    if is_playlist {
+        let playlist: Playlist = serde_json::from_value(value)?;
+        Ok(YoutubeDlOutput::Playlist(Box::new(playlist)))
+    } else {
+        let video: SingleVideo = serde_json::from_value(value)?;
+        Ok(YoutubeDlOutput::SingleVideo(Box::new(video)))
     }
 }
