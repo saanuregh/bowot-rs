@@ -129,7 +129,7 @@ struct Music;
 #[group("Soundboard")]
 #[description = "Soundboard commands."]
 #[only_in("guilds")]
-#[commands(sheesh)]
+#[commands(sheesh, soundboard)]
 struct Soundboard;
 
 // The configuration command.
