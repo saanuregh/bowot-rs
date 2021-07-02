@@ -28,6 +28,6 @@ done
 echo >&2 "Postgres is up and running on port ${DB_PORT}!"
 export DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}
 
-sqlx database create
-sqlx migrate run
+cargo sqlx database create
+cargo sqlx migrate run
 echo >&2 "Postgres has been migrated, ready to go!"
