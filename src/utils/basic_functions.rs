@@ -127,7 +127,7 @@ pub async fn get_uptime(ctx: &Context) -> String {
 pub fn get_process_usage() -> (f32, u64) {
     let pid = get_current_pid().unwrap();
     let s = System::new_with_specifics(RefreshKind::new().with_processes());
-    let p = s.get_process(pid).unwrap();
+    let p = s.process(pid).unwrap();
     (p.cpu_usage(), p.memory())
 }
 
