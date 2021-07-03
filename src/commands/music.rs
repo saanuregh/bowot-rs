@@ -2,7 +2,7 @@ use crate::{
     data::RedisPoolContainer,
     utils::{
         basic_functions::shorten,
-        ytdl::{ytdl_info, YoutubeDlOutput},
+        ytdl::{ytdl_info, SingleVideo, YoutubeDlOutput},
     },
     voice::{format_duration, get_now_playing_embed, join_voice_channel},
     ytdl_cache::YtdlCache,
@@ -59,28 +59,26 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
+async fn _ytdl_push_single_video_into_source(sources: &mut Vec<Input>, single_video: SingleVideo) {
+    match ytdl(&single_video.webpage_url.clone().unwrap()).await {
+        Ok(mut source) => {
+            source.metadata.title = Some(single_video.title);
+            sources.push(source)
+        }
+        Err(why) => error!("Err starting source: {:?}", why),
+    }
+}
+
 async fn _ytdl_push_into_source(sources: &mut Vec<Input>, result: YoutubeDlOutput) {
     match result {
         YoutubeDlOutput::Playlist(p) => {
             if let Some(playlist) = p.entries {
                 for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
-                    match ytdl(&s.webpage_url.clone().unwrap()).await {
-                        Ok(mut source) => {
-                            source.metadata.title = Some(s.title);
-                            sources.push(source)
-                        }
-                        Err(why) => error!("Err starting source: {:?}", why),
-                    }
+                    _ytdl_push_single_video_into_source(sources, s).await;
                 }
             }
         }
-        YoutubeDlOutput::SingleVideo(s) => match ytdl(&s.webpage_url.clone().unwrap()).await {
-            Ok(mut source) => {
-                source.metadata.title = Some(s.title);
-                sources.push(source)
-            }
-            Err(why) => error!("Err starting source: {:?}", why),
-        },
+        YoutubeDlOutput::SingleVideo(s) => _ytdl_push_single_video_into_source(sources, *s).await,
     }
 }
 

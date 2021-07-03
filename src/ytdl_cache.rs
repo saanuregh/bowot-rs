@@ -1,4 +1,4 @@
-use crate::utils::ytdl::{serde_value_to_ytdl, YoutubeDlOutput};
+use crate::utils::ytdl::{serde_value_to_ytdl, SingleVideo, YoutubeDlOutput};
 use bb8_redis::{
     bb8::Pool,
     redis::{self, aio::ConnectionLike},
@@ -32,8 +32,7 @@ impl YtdlCache {
     }
 
     pub async fn set(&self) -> anyhow::Result<()> {
-        let mut conn = self.pool.get().await?;
-
+        let conn = &mut *self.pool.get().await?;
         if let Some(data) = &self.data {
             match data {
                 YoutubeDlOutput::Playlist(data) => {
@@ -41,30 +40,13 @@ impl YtdlCache {
                     if entries.is_empty() {
                         return Ok(());
                     }
-                    _set(&mut *conn, self.query.clone(), serde_json::to_string(data)?).await?;
-                    if data.extractor.clone().unwrap() == "youtube:search" {
-                        let search_result = &entries[0];
-                        if search_result.duration.is_none() {
-                            return Ok(());
-                        }
-                        _set(
-                            &mut *conn,
-                            search_result.webpage_url.clone().unwrap(),
-                            serde_json::to_string(search_result)?,
-                        )
-                        .await?;
+                    _set(conn, self.query.clone(), serde_json::to_string(data)?).await?;
+                    for entry in entries {
+                        _set_single_video(conn, entry, None).await?
                     }
                 }
                 YoutubeDlOutput::SingleVideo(data) => {
-                    if data.duration.is_none() {
-                        return Ok(());
-                    }
-                    _set(
-                        &mut *conn,
-                        data.webpage_url.clone().unwrap(),
-                        serde_json::to_string(data)?,
-                    )
-                    .await?;
+                    _set_single_video(conn, *data.clone(), Some(self.query.clone())).await?
                 }
             };
         }
@@ -75,4 +57,25 @@ impl YtdlCache {
 
 async fn _set<C: ConnectionLike>(conn: &mut C, query: String, data: String) -> anyhow::Result<()> {
     Ok(Cmd::set_ex(query, data, 864000).query_async(conn).await?)
+}
+
+async fn _set_single_video<C: ConnectionLike>(
+    conn: &mut C,
+    single_video: SingleVideo,
+    query: Option<String>,
+) -> anyhow::Result<()> {
+    if single_video.duration.is_none() {
+        return Ok(());
+    }
+    _set(
+        &mut *conn,
+        single_video.webpage_url.clone().unwrap(),
+        serde_json::to_string(&single_video)?,
+    )
+    .await?;
+    if let Some(query) = query {
+        _set(&mut *conn, query, serde_json::to_string(&single_video)?).await?;
+    }
+
+    Ok(())
 }
