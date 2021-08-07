@@ -41,7 +41,6 @@ async fn reddit_command(
 
 /// Gets random meme from reddit.
 #[command]
-#[aliases(dank)]
 #[bucket(reddit)]
 async fn meme(ctx: &Context, msg: &Message) -> CommandResult {
     reddit_command(ctx, msg, SUBREDDIT_MEMES.to_vec(), true).await

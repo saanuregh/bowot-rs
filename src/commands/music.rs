@@ -28,7 +28,7 @@ const MAX_PLAYLIST: usize = 25;
 
 /// Joins me to the voice channel you are currently on.
 #[command]
-#[aliases("connect")]
+#[aliases(j)]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     if join_voice_channel(ctx, msg).await.is_some() {
         msg.react(ctx, '✅').await?;
@@ -41,6 +41,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Disconnects me from the voice channel if im in one.
 #[command]
+#[aliases(l)]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -187,6 +188,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 /// Stops the current player (clears song queue).
 #[command]
+#[aliases(s)]
 async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -211,6 +213,7 @@ async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Show the song queue.
 #[command]
+#[aliases(q)]
 async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -266,6 +269,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Clears the song queue.
 #[command]
+#[aliases(cq)]
 async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -290,6 +294,7 @@ async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Shuffles the song queue.
 #[command]
+#[aliases(sh)]
 async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -322,6 +327,7 @@ async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
 /// Skips the current song being played.
 #[command]
 #[aliases(next)]
+#[aliases(sk)]
 async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -346,6 +352,7 @@ async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Pauses the current song.
 #[command]
+#[aliases(pp)]
 async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -370,7 +377,7 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Resumes the current song.
 #[command]
-#[aliases(unpause)]
+#[aliases(up)]
 async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -395,7 +402,7 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
 
 /// Displays the information about the currently playing song.
 #[command]
-#[aliases(np, nowplaying, playing)]
+#[aliases(np)]
 async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
     let data = ctx.data.read().await;
@@ -470,6 +477,7 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
 /// or `remove 1`
 #[command]
 #[num_args(1)]
+#[aliases(r)]
 async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let index = args.single::<usize>().unwrap();
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;

@@ -63,7 +63,7 @@ async fn sheesh(ctx: &Context, msg: &Message) -> CommandResult {
 /// Usage: `soundboard imdying`
 /// or `soundboard` to list all sound clips
 #[command]
-#[aliases(s)]
+#[aliases(sb)]
 async fn soundboard(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let query = args.message().to_string();
     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
