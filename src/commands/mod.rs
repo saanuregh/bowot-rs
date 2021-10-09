@@ -1,11 +1,6 @@
-pub mod configuration;
 pub mod economy;
 pub mod fun;
-pub mod games;
-pub mod hydrate;
 pub mod meta;
-pub mod moderation;
 pub mod music;
 pub mod reddit;
 pub mod roleplay;
-pub mod soundboard;

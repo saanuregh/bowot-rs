@@ -1,4 +1,11 @@
 version: "3"
 services:
-  bowot:
-    build: .
+  db:
+    image: postgres:alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+    ports:
+      - 5432:5432

@@ -1,123 +1,124 @@
-mod cache;
 mod commands;
 mod constants;
 mod data;
 mod database;
 mod framework;
-mod handler;
-mod service;
-mod soundboard;
+mod lavalink;
+mod services;
+mod types;
 mod utils;
-mod voice;
-mod ytdl_cache;
 
-use bb8_redis::{bb8, RedisConnectionManager};
-use data::*;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+use anyhow::Context;
+use dotenv;
+use framework::get_framework_builder;
 use itconfig::*;
-use serenity::{
-    client::{bridge::gateway::GatewayIntents, Client},
-    http::Http,
+use lavalink_rs::LavalinkClient;
+use poise::{
+    serenity::{client::parse_token, http::Http},
+    serenity_prelude::{GatewayIntents, RwLock},
 };
-use songbird::SerenityInit;
-
-use mimalloc::MiMalloc;
-use soundboard::init_sound_store;
+use songbird::{SerenityInit, Songbird};
 use sqlx::postgres::PgPoolOptions;
-use std::{clone::Clone, collections::HashSet, sync::Arc, time::Duration};
-use tokio::{
-    signal::unix::{signal, SignalKind},
-    time::Instant,
-};
-use tracing::{error, info};
+use tokio::time::Instant;
+use tracing::info;
 use tracing_log::env_logger;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+use crate::{
+    data::{Data, IdleGuildMap, LastMessageMap, PgPoolContainer, Uptime},
+    lavalink::LavalinkHandler,
+    types::{IdleHashMap, LastMessageHashMap},
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv()?;
     env_logger::init();
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(EnvFilter::from_default_env())
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let bot_token = get_env::<String>("TOKEN").expect("env::TOKEN not set");
+    info!("Starting bot");
+
+    let bot_token = get_env::<String>("TOKEN")?;
+    let bot_id = parse_token(bot_token.clone())
+        .with_context(|| "Token is invalid".to_owned())?
+        .bot_user_id;
+
     let http = Http::new_with_token(&bot_token);
-    let (owners, bot_id) = match http.get_current_application_info().await {
-        Ok(info) => {
-            let mut owners = HashSet::new();
-            owners.insert(info.owner.id);
-            (owners, info.id)
-        }
-        Err(why) => panic!("Could not access application info: {:?}", why),
-    };
+    let owner_id = http
+        .get_current_application_info()
+        .await
+        .with_context(|| "Failed to get application info".to_owned())?
+        .owner
+        .id;
 
-    let std_framework = framework::get_std_framework(owners, bot_id).await;
+    let mut owners = HashSet::new();
+    owners.insert(owner_id);
 
-    let mut client = Client::builder(&bot_token)
-        .event_handler(handler::Handler::new())
-        .framework(std_framework)
-        .intents({
-            let mut intents = GatewayIntents::all();
-            intents.remove(GatewayIntents::DIRECT_MESSAGE_TYPING);
-            intents.remove(GatewayIntents::GUILD_MESSAGE_TYPING);
-            intents
-        })
-        .register_songbird()
-        .await?;
-
-    let database_url = get_env::<String>("DATABASE_URL").expect("env::DATABASE_URL not set");
+    let database_url = get_env::<String>("DATABASE_URL")?;
     let db_pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
-        .await?;
+        .await
+        .with_context(|| "Failed to connect to database".to_owned())?;
+    let db_pool_clone = db_pool.clone();
 
-    let redis_url = get_env::<String>("REDIS_URL").expect("env::REDIS_URL not set");
-    let redis_manager = RedisConnectionManager::new(redis_url)?;
-    let redis_pool = bb8::Pool::builder()
-        .connection_timeout(Duration::from_secs(5))
-        .build(redis_manager)
-        .await?;
+    info!("Database client started");
 
-    {
-        let mut data = client.data.write().await;
-        data.insert::<PgPoolContainer>(db_pool.clone());
-        data.insert::<RedisPoolContainer>(redis_pool.clone());
-        data.insert::<ShardManagerContainer>(client.shard_manager.clone());
-        data.insert::<Uptime>(Instant::now());
-        data.insert::<GuildCacheStore>(Arc::new(Default::default()));
-        data.insert::<SoundStore>(Arc::new(init_sound_store().await));
-    }
+    let last_message_map: LastMessageHashMap = Arc::new(RwLock::new(HashMap::new()));
+    let last_message_map_clone = last_message_map.clone();
 
-    let signal_kinds = vec![
-        SignalKind::hangup(),
-        SignalKind::interrupt(),
-        SignalKind::terminate(),
-    ];
+    let idle_hash_map: IdleHashMap = Arc::new(RwLock::new(HashMap::new()));
+    let idle_hash_map_clone = idle_hash_map.clone();
 
-    for signal_kind in signal_kinds {
-        let mut stream = signal(signal_kind).unwrap();
-        let shard_manager = client.shard_manager.clone();
-        let db_pool = db_pool.clone();
-        let redis_pool = db_pool.clone();
+    info!("Lavalink client started");
 
-        tokio::spawn(async move {
-            stream.recv().await;
-            info!("Shutting down");
-            shard_manager.lock().await.shutdown_all().await;
-            info!("Closing database pool");
-            db_pool.close().await;
-            info!("Closing redis pool");
-            redis_pool.close().await;
-            info!("Bye!!!");
-        });
-    }
+    let songbird = Songbird::serenity();
+    let songbird_clone = songbird.clone();
 
-    if let Err(why) = client.start_autosharded().await {
-        error!("An error occurred while running the client: {:?}", why);
-    }
+    get_framework_builder(bot_token, owners)
+        .user_data_setup(move |ctx, _ready, _framework| {
+            Box::pin(async move {
+                let lavalink_host = get_env::<String>("LAVALINK_HOST")?;
+                let lavalink_password = get_env::<String>("LAVALINK_PASSWORD")?;
+                let lavalink = LavalinkClient::builder(bot_id.0)
+                    .set_host(lavalink_host)
+                    .set_password(lavalink_password)
+                    .build(LavalinkHandler::new(
+                        last_message_map_clone,
+                        idle_hash_map_clone,
+                        ctx.http.clone(),
+                        songbird_clone.clone(),
+                    ))
+                    .await
+                    .with_context(|| "Failed to start the Lavalink client")?;
+                Ok(Data::new(songbird_clone, lavalink))
+            })
+        })
+        .client_settings(|client_builder| {
+            client_builder
+                .intents({
+                    let mut intents = GatewayIntents::all();
+                    intents.remove(GatewayIntents::DIRECT_MESSAGE_TYPING);
+                    intents.remove(GatewayIntents::GUILD_MESSAGE_TYPING);
+                    intents
+                })
+                .register_songbird_with(songbird)
+                .type_map_insert::<PgPoolContainer>(db_pool_clone)
+                .type_map_insert::<Uptime>(Instant::now())
+                .type_map_insert::<LastMessageMap>(last_message_map)
+                .type_map_insert::<IdleGuildMap>(idle_hash_map)
+        })
+        .run()
+        .await
+        .with_context(|| "Failed to start the bot".to_owned())?;
 
     Ok(())
 }

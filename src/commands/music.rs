@@ -1,598 +1,630 @@
-use crate::{
-    data::RedisPoolContainer,
-    utils::{
-        basic_functions::shorten,
-        ytdl::{ytdl_info, SingleVideo, YoutubeDlOutput},
+use anyhow::Context;
+use parse_duration::parse as parse_duration;
+use poise::{
+    command,
+    serenity::model::{
+        guild::Guild,
+        id::{ChannelId, UserId},
+        misc::Mentionable,
     },
-    voice::{format_duration, get_now_playing_embed, join_voice_channel},
-    ytdl_cache::YtdlCache,
 };
-use rand::Rng;
-use serenity::{
-    client::Context,
-    framework::standard::{macros::command, Args, CommandResult, Delimiter},
-    model::channel::Message,
+use tokio::time::Instant;
+use url::Url;
+
+use crate::{
+    constants::{
+        DESCRIPTION_LENGTH_CUTOFF, LIVE_INDICATOR, MAX_LIST_ENTRY_LENGTH, MAX_SINGLE_ENTRY_LENGTH,
+        UNKNOWN_TITLE,
+    },
+    data::{IdleGuildMap, LastMessageMap},
+    types::{Error, PoiseContext},
+    utils::{
+        discord::{guild_check, reply, reply_embed},
+        helpers::{chop_str, display_time_span, push_chopped_str},
+    },
 };
-use songbird::{
-    input::{ytdl, Input},
-    SongbirdKey,
-};
-use strum_macros::{EnumString, ToString};
-use tracing::{error, info};
 
-const JOIN_MSG: &str = "Please, connect the bot to the voice channel you are currently on first with the `join` command.";
-const QUEUE_EMPTY_MSG: &str = "The queue is empty";
-const NOTIN_VC_MSG: &str = "Not in a voice channel";
-const NOTHING_PLAYING: &str = "Nothing playing";
-const MAX_PLAYLIST: usize = 25;
+async fn join_internal<G, C>(
+    ctx: &PoiseContext<'_>,
+    guild_id: G,
+    channel_id: C,
+) -> Result<(), Error>
+where
+    G: Into<u64>,
+    C: Into<u64>,
+{
+    let guild_id: u64 = guild_id.into();
+    let (_, handler) = ctx
+        .data()
+        .songbird
+        .join_gateway(guild_id, channel_id.into())
+        .await;
 
-/// Joins me to the voice channel you are currently on.
-#[command]
-#[aliases(j)]
-async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    if join_voice_channel(ctx, msg).await.is_some() {
-        msg.react(ctx, '✅').await?;
-    } else {
-        msg.reply(ctx, NOTIN_VC_MSG).await?;
-    }
+    match handler {
+        Ok(connection_info) => {
+            match ctx
+                .data()
+                .lavalink
+                .create_session_with_songbird(&connection_info)
+                .await
+            {
+                Ok(_) => {
+                    {
+                        let data = ctx.discord().data.read().await;
+                        let mut idle_hash_map =
+                            data.get::<IdleGuildMap>().expect("msg").write().await;
+                        idle_hash_map.insert(guild_id, Instant::now());
+                    }
 
-    Ok(())
-}
-
-/// Disconnects me from the voice channel if im in one.
-#[command]
-#[aliases(l)]
-async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if manager.get(guild_id).is_some() {
-        if let Err(e) = manager.remove(guild_id).await {
-            msg.reply(ctx, format!("Failed: {:?}", e)).await?;
-        }
-        msg.react(ctx, '✅').await?;
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-async fn _ytdl_push_single_video_into_source(sources: &mut Vec<Input>, single_video: SingleVideo) {
-    match ytdl(&single_video.webpage_url.clone().unwrap()).await {
-        Ok(mut source) => {
-            source.metadata.title = Some(single_video.title);
-            sources.push(source)
-        }
-        Err(why) => error!("Err starting source: {:?}", why),
-    }
-}
-
-async fn _ytdl_push_into_source(sources: &mut Vec<Input>, result: YoutubeDlOutput) {
-    match result {
-        YoutubeDlOutput::Playlist(p) => {
-            if let Some(playlist) = p.entries {
-                for s in playlist.clone().into_iter().take(MAX_PLAYLIST) {
-                    _ytdl_push_single_video_into_source(sources, s).await;
+                    Ok(())
                 }
+                Err(e) => Err(Box::new(e)),
             }
         }
-        YoutubeDlOutput::SingleVideo(s) => _ytdl_push_single_video_into_source(sources, *s).await,
+        Err(e) => Err(Box::new(e)),
     }
 }
 
-/// Adds a song to the queue.
-///
-/// Usage: `play starmachine2000`
-/// or `play https://www.youtube.com/watch?v=dQw4w9WgXcQ`
-#[command]
-#[min_args(1)]
-#[aliases(p)]
-async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let query = args.message().to_string();
-    if !msg.embeds.is_empty() {
-        let _ = msg.clone().suppress_embeds(ctx).await;
-    }
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    let handler_lock = match manager.get(guild_id) {
-        Some(hl) => hl,
-        None => match join_voice_channel(ctx, msg).await {
-            Some(hl) => hl,
-            None => {
-                msg.reply(ctx, NOTIN_VC_MSG).await?;
+fn author_channel_id_from_guild(guild: &Guild, authour_id: &UserId) -> Option<ChannelId> {
+    guild
+        .voice_states
+        .get(authour_id)
+        .and_then(|voice_state| voice_state.channel_id)
+}
 
-                return Ok(());
-            }
-        },
+/// Have bot join the voice channel you're in.
+#[command(slash_command, aliases("j"))]
+pub async fn join(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let channel_id = match author_channel_id_from_guild(&guild, &ctx.author().id) {
+        Some(channel) => channel,
+        None => {
+            reply(ctx, "You must use this command while in a voice channel.").await?;
+            return Ok(());
+        }
     };
-    let loading_msg = msg.reply(ctx, "Loading...").await?;
-    let redis_con = data
-        .get::<RedisPoolContainer>()
-        .expect("Expected RedisPoolContainer in TypeMap");
-    let mut sources: Vec<Input> = Vec::new();
-    let mut cache_hit = false;
-    match YtdlCache::new(redis_con.clone(), query.clone(), None)
-        .get()
-        .await
-    {
-        Ok(result) => {
-            cache_hit = true;
-            info!("ytdl cache hit for {}", query);
-            _ytdl_push_into_source(&mut sources, result).await;
-        }
-        Err(err) => error!("error fetching cache for query:{}\n{:?}", query, err),
-    }
 
-    if !cache_hit {
-        match ytdl_info(query.clone(), None).await {
-            Ok(result) => {
-                info!("ytdl cache miss for {}", query);
-                _ytdl_push_into_source(&mut sources, result.clone()).await;
-                if let Err(err) = YtdlCache::new(redis_con.clone(), query.clone(), Some(result))
-                    .set()
-                    .await
-                {
-                    error!("error caching query:{}\n{:?}", query, err)
-                };
-            }
-            Err(err) => error!("error fetching query:{}\n{:?}", query, err),
-        }
-    }
-
-    let _ = loading_msg.delete(ctx).await;
-    if sources.is_empty() {
-        msg.reply(ctx, "Couldn't find any result for the query")
-            .await?;
-
-        return Ok(());
-    }
-    let mut handler = handler_lock.lock().await;
-    let sources_len = sources.len();
-    if sources_len > 1 {
-        msg.reply(ctx, format!("__**Queued:**__  `{}` tracks", sources_len))
-            .await?;
-    } else {
-        let metadata = sources.first().unwrap().metadata.as_ref().clone();
-        if handler.queue().current().is_none() {
-            msg.channel_id
-                .send_message(ctx, |m| {
-                    m.reference_message(msg);
-                    get_now_playing_embed(m, metadata);
-                    m
-                })
-                .await?;
-        } else {
-            msg.reply(
+    match join_internal(&ctx, guild.id, channel_id).await {
+        Ok(_) => reply(ctx, format!("Joined: {}", channel_id.mention())).await?,
+        Err(e) => {
+            reply(
                 ctx,
-                format!(
-                    "__**Queued:**__  `{}` | `{}`",
-                    metadata.title.unwrap(),
-                    format_duration(metadata.duration)
-                ),
+                format!("Error joining {}: {}", channel_id.mention(), e),
             )
             .await?;
+            return Ok(());
         }
-    }
-    for source in sources {
-        handler.enqueue_source(source)
-    }
+    };
 
     Ok(())
 }
 
-/// Stops the current player (clears song queue).
-#[command]
-#[aliases(s)]
-async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if queue.current().is_some() {
-            queue.stop();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, NOTHING_PLAYING).await?;
+/// Have bot leave the voice channel it's in, if any.
+#[command(slash_command, aliases("l"))]
+pub async fn leave(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let manager = &ctx.data().songbird;
+
+    if manager.get(guild.id).is_some() {
+        if let Err(e) = manager.remove(guild.id).await {
+            reply(ctx, format!("Error leaving voice channel: {}", e)).await?;
         }
+
+        let lava_client = &ctx.data().lavalink;
+        lava_client.destroy(guild.id.0).await?;
+
+        reply(ctx, "Left the voice channel.").await?;
     } else {
-        msg.reply(ctx, JOIN_MSG).await?;
+        reply(ctx, "Not in a voice channel.").await?;
     }
 
     Ok(())
 }
 
-/// Show the song queue.
-#[command]
-#[aliases(q)]
-async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue().current_queue();
-        if !queue.is_empty() {
-            let mut queue_str = String::new();
-            let metadata = queue[0].metadata();
-            queue_str += &format!(
-                "__**Now playing:**__\n```yaml\n{} | {}\n```",
-                shorten(&metadata.title.clone().unwrap(), 40),
-                format_duration(metadata.duration)
-            );
-            if queue.len() > 1 {
-                queue_str += "\n__**Queue:**__\n```yaml\n";
-                for (index, track) in queue[1..].iter().take(10).enumerate() {
-                    let metadata = track.metadata();
-                    queue_str += &format!(
-                        "{}: {} | {}\n",
-                        index + 1,
-                        shorten(&metadata.title.clone().unwrap(), 40),
-                        format_duration(metadata.duration)
-                    );
-                }
-                if queue.len() > 10 {
-                    queue_str += &format!("... {}", queue.len());
-                }
-                queue_str += "\n```";
-            }
-            queue_str = queue_str.replace("@", "@\u{200B}");
-            msg.channel_id
-                .send_message(ctx.clone(), |m| {
-                    m.reference_message(msg);
-                    m.embed(|e| {
-                        e.description(&queue_str);
-                        e
-                    })
-                })
-                .await?;
-        } else {
-            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
+/// Queue up a song or playlist from YouTube, Twitch, Vimeo, SoundCloud, etc.
+#[command(slash_command, defer_response, aliases("p"))]
+pub async fn play(
+    ctx: PoiseContext<'_>,
+    #[rest]
+    #[description = "What to play."]
+    query: String,
+) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    {
+        let data = ctx.discord().data.read().await;
+        let mut last_message_map = data.get::<LastMessageMap>().expect("msg").write().await;
+        last_message_map.insert(guild.id.0, ctx.channel_id());
     }
 
-    Ok(())
-}
+    let manager = &ctx.data().songbird;
+    let lava_client = &ctx.data().lavalink;
 
-/// Clears the song queue.
-#[command]
-#[aliases(cq)]
-async fn clear_queue(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if !queue.is_empty() {
-            queue.modify_queue(|q| q.truncate(1));
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Shuffles the song queue.
-#[command]
-#[aliases(sh)]
-async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if !queue.is_empty() {
-            queue.modify_queue(|q| {
-                let mut rng = rand::thread_rng();
-                let mut i = q.len();
-                while i >= 2 {
-                    i -= 1;
-                    q.swap(i, rng.gen_range(1..i + 1));
-                }
-            });
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Skips the current song being played.
-#[command]
-#[aliases(next)]
-#[aliases(sk)]
-async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if queue.current().is_some() {
-            let _ = queue.skip();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, NOTHING_PLAYING).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Pauses the current song.
-#[command]
-#[aliases(pp)]
-async fn pause(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if queue.current().is_some() {
-            let _ = queue.pause();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, NOTHING_PLAYING).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Resumes the current song.
-#[command]
-#[aliases(up)]
-async fn resume(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if queue.current().is_some() {
-            let _ = queue.resume();
-            msg.react(ctx, '✅').await?;
-        } else {
-            msg.reply(ctx, NOTHING_PLAYING).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-/// Displays the information about the currently playing song.
-#[command]
-#[aliases(np)]
-async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if let Some(np) = queue.current() {
-            let metadata = np.metadata();
-            msg.channel_id
-                .send_message(ctx, |m| {
-                    m.reference_message(msg);
-                    get_now_playing_embed(m, metadata.clone());
-                    m
-                })
-                .await?;
-        } else {
-            msg.reply(ctx, NOTHING_PLAYING).await?;
-        }
-    } else {
-        msg.reply(ctx, JOIN_MSG).await?;
-    }
-
-    Ok(())
-}
-
-// /// Change repeat mode.
-// ///
-// /// Usage: `repeat <one|all|off>`
-// /// or `repeat one`
-// #[command]
-// #[num_args(1)]
-// async fn repeat(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-//     let mode = args.message();
-//     let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-//     let data = ctx.data.read().await;
-//     let player_lock = data
-//         .get::<PlayerManager>()
-//         .cloned()
-//         .expect("Expected PlayerManger in TypeMap");
-//     let mut pm = player_lock.write().await;
-//     if let Some(player) = pm.get_mut(&(guild_id.0 as u64)) {
-//         match mode {
-//             "one" => {
-//                 player.set_repeat(Repeat::One);
-//                 msg.react(ctx, '🔂').await?;
-//             }
-//             "all" => {
-//                 player.set_repeat(Repeat::All);
-//                 msg.react(ctx, '🔁').await?;
-//             }
-//             "off" => {
-//                 player.set_repeat(Repeat::Off);
-//                 msg.react(ctx, '✅').await?;
-//             }
-//             _ => {
-//                 msg.reply(ctx, "Invalid repeat mode").await?;
-//             }
-//         }
-//     } else {
-//         msg.reply(ctx, JOIN_MSG).await?;
-//     }
-
-//     Ok(())
-// }
-
-/// Remove a song from queue.
-///
-/// Usage: `remove <index>`
-/// or `remove 1`
-#[command]
-#[num_args(1)]
-#[aliases(r)]
-async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let index = args.single::<usize>().unwrap();
-    let guild_id = msg.guild(&ctx.cache).await.unwrap().id;
-    let data = ctx.data.read().await;
-    let manager = data
-        .get::<SongbirdKey>()
-        .expect("Expected Songbird in TypeMap");
-    if let Some(handler_lock) = manager.get(guild_id) {
-        let handler = handler_lock.lock().await;
-        let queue = handler.queue();
-        if !queue.is_empty() {
-            if let Some(t) = queue.dequeue(index) {
-                msg.reply(
+    if manager.get(guild.id).is_none() {
+        let channel_id = match author_channel_id_from_guild(&guild, &ctx.author().id) {
+            Some(channel) => channel,
+            None => {
+                reply(
                     ctx,
-                    format!("Removed - {}", t.metadata().title.clone().unwrap()),
+                    "You must use this command while either you or the bot is in a voice channel.",
                 )
                 .await?;
-            } else {
-                msg.reply(ctx, "Out of bounds").await?;
+                return Ok(());
             }
-        } else {
-            msg.reply(ctx, QUEUE_EMPTY_MSG).await?;
+        };
+
+        if let Err(e) = join_internal(&ctx, guild.id, channel_id).await {
+            reply(
+                ctx,
+                format!("Error joining {}: {}", channel_id.mention(), e),
+            )
+            .await?;
+            return Ok(());
         }
+    }
+
+    let mut queueable_tracks = Vec::new();
+
+    // Queue up any attachments
+    match ctx {
+        PoiseContext::Prefix(prefix_ctx) => {
+            for attachment in &prefix_ctx.msg.attachments {
+                // Verify the attachment is playable
+                let playable_content = match &attachment.content_type {
+                    Some(t) => t.starts_with("audio") || t.starts_with("video"),
+                    None => false,
+                };
+                if !playable_content {
+                    continue;
+                }
+
+                // Queue it up
+                let mut query_result = lava_client.auto_search_tracks(&attachment.url).await?;
+                for track in &mut query_result.tracks {
+                    track.info = match &track.info {
+                        Some(old_info) => {
+                            let mut new_info = old_info.clone();
+                            if old_info.title == UNKNOWN_TITLE {
+                                new_info.title = attachment.filename.clone();
+                            }
+                            Some(new_info)
+                        }
+                        None => None,
+                    }
+                }
+                queueable_tracks.extend_from_slice(&query_result.tracks)
+            }
+        }
+        PoiseContext::Application(_) => {}
+    }
+
+    // Load the command query - if playable attachments were also with the message,
+    // the attachments are queued first
+    let query_information = lava_client.auto_search_tracks(&query).await?;
+
+    let is_url = Url::parse(query.trim()).is_ok();
+
+    // If the query was a URL, then it's likely a playlist where all retrieved
+    // tracks are desired - otherwise, only queue the top result
+    let query_tracks = if is_url {
+        query_information.tracks.len()
     } else {
-        msg.reply(ctx, JOIN_MSG).await?;
+        1
+    };
+
+    queueable_tracks.extend_from_slice(
+        &query_information
+            .tracks
+            .iter()
+            .take(query_tracks)
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+
+    if queueable_tracks.is_empty() {
+        reply(ctx, "Could not find anything for the search query.").await?;
+        return Ok(());
+    }
+
+    let queueable_tracks_len = queueable_tracks.len();
+
+    // For URLs that point to raw files, Lavalink seems to just return them with a
+    // title of "Unknown title" - this is a slightly hacky solution to set the title
+    // to the filename of the raw file
+    if is_url && query_tracks == 1 {
+        let track_info = &mut queueable_tracks[queueable_tracks_len - 1];
+        if track_info.info.is_some() && track_info.info.as_ref().unwrap().title.eq(UNKNOWN_TITLE) {
+            track_info.info = match &track_info.info {
+                Some(old_info) => {
+                    let mut new_info = old_info.clone();
+                    new_info.title = Url::parse(old_info.uri.as_str())
+                        .expect(
+                            "Unable to parse track info URI when it should have been guaranteed \
+							 to be valid",
+                        )
+                        .path_segments()
+                        .expect("Unable to parse URI as a proper path")
+                        .last()
+                        .expect("Unable to find the last path segment of URI")
+                        .to_owned();
+                    Some(new_info)
+                }
+                None => None,
+            };
+        }
+    }
+
+    // Queue the tracks up
+    for track in &queueable_tracks {
+        if let Err(e) = lava_client
+            .play(guild.id.0, track.clone())
+            .requester(ctx.author().id.0)
+            .queue()
+            .await
+        {
+            reply(ctx, "Failed to queue up query result.").await?;
+            eprintln!("Failed to queue up query result: {}", e);
+            return Ok(());
+        };
+    }
+
+    // Notify the user of the added tracks
+    if queueable_tracks_len == 1 {
+        let track_info = queueable_tracks[0].info.as_ref().unwrap();
+        reply(
+            ctx,
+            format!(
+                "Added to queue: [{}]({}) [{}]",
+                chop_str(track_info.title.as_str(), MAX_SINGLE_ENTRY_LENGTH),
+                track_info.uri,
+                if track_info.is_stream {
+                    LIVE_INDICATOR.to_owned()
+                } else {
+                    display_time_span(track_info.length)
+                }
+            ),
+        )
+        .await?;
+    } else {
+        let mut desc = String::from("Requested by ");
+        desc.push_str(ctx.author().mention().to_string().as_str());
+        desc.push('\n');
+        for (i, track) in queueable_tracks.iter().enumerate() {
+            let track_info = track.info.as_ref().unwrap();
+            desc.push_str("- [");
+            push_chopped_str(&mut desc, track_info.title.as_str(), MAX_LIST_ENTRY_LENGTH);
+            desc.push_str("](");
+            desc.push_str(track_info.uri.as_str());
+            desc.push(')');
+            if i < queueable_tracks_len - 1 {
+                desc.push('\n');
+                if desc.len() > DESCRIPTION_LENGTH_CUTOFF {
+                    desc.push_str("*…the rest has been clipped*");
+                    break;
+                }
+            }
+        }
+        reply_embed(ctx, |e| {
+            e.title(format!("Added {} Tracks:", queueable_tracks_len))
+                .description(desc)
+        })
+        .await?;
     }
 
     Ok(())
 }
 
-#[derive(Copy, Clone, Debug, EnumString, ToString)]
-enum LofiStation {
-    #[strum(serialize = "https://youtu.be/5qap5aO4i9A", serialize = "ChilledCow")]
-    ChilledCow,
-    #[strum(serialize = "https://youtu.be/DWcJFNfaw9c", serialize = "ChilledCow2")]
-    ChilledCow2,
-    #[strum(
-        serialize = "https://youtu.be/5yx6BWlEVcY",
-        serialize = "ChillHopMusic"
-    )]
-    ChillHopMusic,
-    #[strum(
-        serialize = "https://youtu.be/7NOSDKb0HlU",
-        serialize = "ChillHopMusic2"
-    )]
-    ChillHopMusic2,
-    #[strum(
-        serialize = "https://youtu.be/WBfbkPTqUtU",
-        serialize = "TokyoLostTracks"
-    )]
-    TokyoLostTracks,
-    #[strum(
-        serialize = "https://youtu.be/OVPPOwMpSpQ",
-        serialize = "TheJazzhopCafe"
-    )]
-    TheJazzhopCafe,
-    #[strum(
-        serialize = "https://youtu.be/ZYMuB9y549s",
-        serialize = "HomeworkRadio"
-    )]
-    HomeworkRadio,
-    #[strum(serialize = "https://youtu.be/-5KAN9_CzSA", serialize = "SteezyAsFuck")]
-    SteezyAsFuck,
-    #[strum(
-        serialize = "https://youtu.be/l7TxwBhtTUY",
-        serialize = "TheBootLegBoy"
-    )]
-    TheBootLegBoy,
-    #[strum(serialize = "https://youtu.be/B8tQ8RUbTW8", serialize = "InYourChill")]
-    InYourChill,
-    #[strum(serialize = "https://youtu.be/bM0Iw7PPoU4", serialize = "CollegeMusic")]
-    CollegeMusic,
+/// Skip the current track.
+#[command(slash_command, aliases("next", "stop", "n", "s"))]
+pub async fn skip(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    if let Some(track) = lava_client.skip(guild.id.0).await {
+        let track_info = track.track.info.as_ref().unwrap();
+        // If the queue is now empty, the player needs to be stopped
+        if lava_client
+            .nodes()
+            .await
+            .get(&guild.id.0)
+            .unwrap()
+            .queue
+            .is_empty()
+        {
+            lava_client
+                .stop(guild.id.0)
+                .await
+                .with_context(|| "Failed to stop playback of the current track".to_owned())?;
+        }
+        reply(
+            ctx,
+            format!(
+                "Skipped: [{}]({})",
+                chop_str(track_info.title.as_str(), MAX_SINGLE_ENTRY_LENGTH),
+                track_info.uri
+            ),
+        )
+        .await?;
+    } else {
+        reply(ctx, "Nothing to skip.").await?;
+    }
+
+    Ok(())
 }
 
-/// Play a lofi stream.
+/// Pause the current track.
 ///
-/// Usage: `lofi <id>`
+/// The opposite of `resume`.
+#[command(slash_command)]
+pub async fn pause(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    if let Err(e) = lava_client.pause(guild.id.0).await {
+        reply(ctx, "Failed to pause playback.").await?;
+        eprintln!("Failed to pause playback: {}", e);
+        return Ok(());
+    };
+
+    reply(ctx, "Paused playback.").await?;
+
+    Ok(())
+}
+
+/// Resume the current track.
 ///
-/// Available Channels:
-/// ```
-/// +-----------------+------------------------------+
-/// |       ID        |             URL              |
-/// +-----------------+------------------------------+
-/// | ChilledCow      | https://youtu.be/5qap5aO4i9A |
-/// | ChilledCow2     | https://youtu.be/DWcJFNfaw9c |
-/// | ChillHopMusic   | https://youtu.be/5yx6BWlEVcY |
-/// | ChillHopMusic2  | https://youtu.be/7NOSDKb0HlU |
-/// | TokyoLostTracks | https://youtu.be/WBfbkPTqUtU |
-/// | TheJazzhopCafe  | https://youtu.be/OVPPOwMpSpQ |
-/// | HomeworkRadio   | https://youtu.be/ZYMuB9y549s |
-/// | SteezyAsFuck    | https://youtu.be/-5KAN9_CzSA |
-/// | TheBootLegBoy   | https://youtu.be/l7TxwBhtTUY |
-/// | InYourChill     | https://youtu.be/B8tQ8RUbTW8 |
-/// | CollegeMusic    | https://youtu.be/bM0Iw7PPoU4 |
-/// +-----------------+------------------------------+
-/// ```
-#[command]
-#[num_args(1)]
-async fn lofi(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    match args.single::<LofiStation>() {
-        Ok(station) => {
-            play(
-                ctx,
-                msg,
-                Args::new(&station.to_string(), &[Delimiter::Single(' ')]),
-            )
-            .await?;
+/// The opposite of `pause`.
+#[command(slash_command)]
+pub async fn resume(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    if let Err(e) = lava_client.resume(guild.id.0).await {
+        reply(ctx, "Failed to resume playback.").await?;
+        eprintln!("Failed to resume playback: {}", e);
+        return Ok(());
+    };
+
+    reply(ctx, "Resumed playback.").await?;
+
+    Ok(())
+}
+
+/// Seek to a specific time in the current track.
+///
+/// You can specify the time to skip to as a timecode (`2:35`) or as individual
+/// time values (`2m35s`).
+///
+/// If the time specified is past the end of the track, the track ends.
+#[command(slash_command, aliases("scrub", "jump"))]
+pub async fn seek(
+    ctx: PoiseContext<'_>,
+    #[rest]
+    #[description = "What time to skip to."]
+    time: String,
+) -> Result<(), Error> {
+    // Constants
+    const COLON: char = ':';
+    const DECIMAL: char = '.';
+
+    // Parse the time - this is a little hacky and gross, but it allows for support
+    // of timecodes like `2:35`. This is more ergonomic for users than something
+    // like `2m35s`, and this way both formats are supported.
+    let mut invalid_value = false;
+    let mut time_prepared = String::with_capacity(time.len());
+    'prepare_time: for timecode in time.split_whitespace() {
+        // First iteration to find indices and make sure the timecode is valid
+        let mut colon_index_first = None;
+        let mut colon_index_second = None;
+        let mut decimal_index = None;
+        for (i, c) in timecode.chars().enumerate() {
+            if c == COLON {
+                if colon_index_first.is_none() {
+                    colon_index_first = Some(i);
+                } else if colon_index_second.is_none() {
+                    colon_index_second = Some(i);
+                } else {
+                    // Maximum of two colons in a timecode
+                    invalid_value = true;
+                    break 'prepare_time;
+                }
+                if decimal_index.is_some() {
+                    // Colons don't come after decimals
+                    invalid_value = true;
+                    break 'prepare_time;
+                }
+            } else if c == DECIMAL {
+                if decimal_index.is_none() {
+                    decimal_index = Some(i);
+                } else {
+                    // Only one decimal value
+                    invalid_value = true;
+                    break 'prepare_time;
+                }
+            }
         }
+
+        // Second iteration using those indices to convert the timecode to a duration
+        // representation
+        let mut new_word = String::with_capacity(timecode.len());
+        for (i, c) in timecode.chars().enumerate() {
+            if colon_index_first.is_some() && i == colon_index_first.unwrap() {
+                if colon_index_second.is_some() {
+                    new_word.push('h');
+                } else {
+                    new_word.push('m');
+                }
+            } else if colon_index_second.is_some() && i == colon_index_second.unwrap() {
+                new_word.push('m');
+            } else if decimal_index.is_some() && i == decimal_index.unwrap() {
+                new_word.push('s');
+            } else {
+                new_word.push(c);
+            }
+        }
+        if decimal_index.is_some() {
+            new_word.push_str("ms");
+        } else if colon_index_first.is_some() {
+            new_word.push('s');
+        }
+
+        // Push the prepared timecode to the result
+        time_prepared.push_str(new_word.as_str());
+        time_prepared.push(' ');
+    }
+    if invalid_value {
+        reply(ctx, "Invalid value for time.").await?;
+        return Ok(());
+    }
+
+    let time_dur = match parse_duration(time_prepared.as_str()) {
+        Ok(duration) => duration,
         Err(_) => {
-            msg.reply(
-                ctx,
-                "Invalid channel ID, try `help lofi` for all the available channels.",
-            )
+            reply(ctx, "Invalid value for time.").await?;
+            return Ok(());
+        }
+    };
+
+    // Seek to the parsed time
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    if let Err(e) = lava_client.seek(guild.id.0, time_dur).await {
+        reply(ctx, "Failed to seek to the specified time.").await?;
+        eprintln!("Failed to seek to the specified time: {}", e);
+        return Ok(());
+    };
+
+    reply(ctx, "Scrubbed to the specified time.").await?;
+
+    Ok(())
+}
+
+/// Clear the playback queue.
+///
+/// In addition to clearing the queue, this also resets the queue position for
+/// new tracks. This is the only way this happens other than when the bot goes
+/// offline.
+#[command(slash_command, aliases("c"))]
+pub async fn clear(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    while lava_client.skip(guild.id.0).await.is_some() {}
+    lava_client
+        .stop(guild.id.0)
+        .await
+        .with_context(|| "Failed to stop playback of the current track".to_owned())?;
+    reply(ctx, "The queue is now empty.").await?;
+
+    Ok(())
+}
+
+/// Show what's currently playing, and how far in you are in the track.
+///
+/// If the track has a defined end point, a progress bar will be displayed.
+/// Otherwise, if the track is a live stream, only the time it's been playing
+/// will be displayed.
+#[command(
+    slash_command,
+    rename = "nowplaying",
+    aliases("np", "position", "current", "rn")
+)]
+pub async fn now_playing(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    let mut something_playing = false;
+    if let Some(node) = lava_client.nodes().await.get(&guild.id.0) {
+        if let Some(now_playing) = &node.now_playing {
+            let track_info = now_playing.track.info.as_ref().unwrap();
+            reply_embed(ctx, |e| {
+                e.title("Now Playing")
+                    .field(
+                        "Track:",
+                        format!(
+                            "[{}]({})",
+                            chop_str(track_info.title.as_str(), MAX_SINGLE_ENTRY_LENGTH),
+                            track_info.uri,
+                        ),
+                        false,
+                    )
+                    .field("Duration:", display_time_span(track_info.length), true)
+                    .field(
+                        "Requested By:",
+                        UserId(
+                            now_playing
+                                .requester
+                                .expect("Expected a requester associated with a playing track")
+                                .0,
+                        )
+                        .mention(),
+                        true,
+                    )
+            })
+            .await?;
+            something_playing = true;
+        }
+    }
+    if !something_playing {
+        reply(ctx, "Nothing is playing at the moment.").await?;
+    }
+
+    Ok(())
+}
+
+/// Show the playback queue.
+#[command(slash_command, aliases("q"))]
+pub async fn queue(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let guild = guild_check(ctx).await?;
+
+    let lava_client = &ctx.data().lavalink;
+
+    let mut something_in_queue = false;
+    if let Some(node) = lava_client.nodes().await.get(&guild.id.0) {
+        let queue = &node.queue;
+        let queue_len = queue.len();
+
+        if queue_len > 0 {
+            something_in_queue = true;
+
+            let mut desc = String::new();
+            for (i, queued_track) in queue.iter().enumerate() {
+                let track_info = queued_track.track.info.as_ref().unwrap();
+                desc.push_str(format!("`{}.` [", i + 1).as_str());
+                push_chopped_str(&mut desc, track_info.title.as_str(), MAX_LIST_ENTRY_LENGTH);
+                desc.push_str("](");
+                desc.push_str(track_info.uri.as_str());
+                desc.push(')');
+                if i < queue_len - 1 {
+                    desc.push('\n');
+                    if desc.len() > DESCRIPTION_LENGTH_CUTOFF {
+                        desc.push_str("*…the rest has been clipped*");
+                        break;
+                    }
+                }
+            }
+            reply_embed(ctx, |e| {
+                e.title(if queue_len != 1 {
+                    format!("Queue ({} total tracks):", queue_len)
+                } else {
+                    format!("Queue ({} total track):", queue_len)
+                })
+                .description(desc)
+            })
             .await?;
         }
+    }
+    if !something_in_queue {
+        reply(ctx, "Nothing is in the queue.").await?;
     }
 
     Ok(())

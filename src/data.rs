@@ -1,19 +1,12 @@
-use crate::cache::GuildCacheMap;
-use bb8_redis::{bb8::Pool, RedisConnectionManager};
-use dashmap::DashMap;
-use serenity::{
-    client::bridge::gateway::ShardManager,
-    prelude::{Mutex, TypeMapKey},
-};
-use songbird::input::cached::Compressed;
+use std::sync::{atomic::AtomicBool, Arc};
+
+use lavalink_rs::LavalinkClient;
+use poise::serenity_prelude::TypeMapKey;
+use songbird::Songbird;
 use sqlx::PgPool;
-use std::sync::Arc;
 use tokio::time::Instant;
 
-pub struct ShardManagerContainer;
-impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
-}
+use crate::types::{IdleHashMap, LastMessageHashMap};
 
 pub struct PgPoolContainer;
 
@@ -26,20 +19,31 @@ pub struct Uptime;
 impl TypeMapKey for Uptime {
     type Value = Instant;
 }
-pub struct GuildCacheStore;
 
-impl TypeMapKey for GuildCacheStore {
-    type Value = Arc<GuildCacheMap>;
+pub struct LastMessageMap;
+
+impl TypeMapKey for LastMessageMap {
+    type Value = LastMessageHashMap;
 }
 
-pub struct SoundStore;
+pub struct IdleGuildMap;
 
-impl TypeMapKey for SoundStore {
-    type Value = Arc<DashMap<String, Compressed>>;
+impl TypeMapKey for IdleGuildMap {
+    type Value = IdleHashMap;
 }
 
-pub struct RedisPoolContainer;
+pub struct Data {
+    pub songbird: Arc<Songbird>,
+    pub lavalink: LavalinkClient,
+    pub is_services_running: AtomicBool,
+}
 
-impl TypeMapKey for RedisPoolContainer {
-    type Value = Pool<RedisConnectionManager>;
+impl Data {
+    pub fn new(songbird: Arc<Songbird>, lavalink: LavalinkClient) -> Self {
+        Self {
+            songbird,
+            lavalink,
+            is_services_running: Default::default(),
+        }
+    }
 }

@@ -1,301 +1,164 @@
+use std::{
+    collections::HashSet,
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
+
+use poise::{EditTracker, Event, Framework, FrameworkBuilder, FrameworkOptions, PrefixFrameworkOptions, samples::on_error, serenity_prelude::UserId};
+use tracing::{error, info};
+
 use crate::{
-    commands::{
-        configuration::*, economy::*, fun::*, games::*, hydrate::*, meta::*, moderation::*,
-        music::*, reddit::*, roleplay::*, soundboard::*,
-    },
-    constants::DEFAULT_PREFIX,
-    GuildCacheStore,
+    commands::{economy, fun, meta, music, reddit, roleplay},
+    constants::PREFIX,
+    data::{Data, PgPoolContainer},
+    database::Guild,
+    services::start_services,
+    types::{Error, SerenityContext},
 };
 
-use serenity::{
-    framework::standard::{
-        help_commands,
-        macros::{group, help, hook},
-        Args, CommandGroup, CommandResult, DispatchError, HelpOptions, Reason, StandardFramework,
-    },
-    model::{channel::Message, id::UserId},
-    prelude::Context,
-    utils::Colour,
-};
-use std::{clone::Clone, collections::HashSet};
-use tracing::{debug, error, info};
+#[allow(clippy::single_match)]
+pub async fn listener<'a>(
+    ctx: &SerenityContext,
+    event: &Event<'a>,
+    _framework: &Framework<Data, Error>,
+    data: &Data,
+) -> Result<(), Error> {
+    match event {
+        Event::Ready { data_about_bot } => {
+            info!("{} is ready!", data_about_bot.user.name);
+        }
+        Event::CacheReady { guilds: _ } => {
+            let ctx = Arc::new(ctx.clone());
+            if *(crate::constants::ENABLE_SERVICES) {
+                if !data.is_services_running.load(Ordering::Relaxed) {
+                    start_services(ctx).await;
+                    data.is_services_running.swap(true, Ordering::Relaxed);
+                    info!("Services started");
+                }
+            }
+        }
+        Event::GuildCreate { guild, is_new: _ } => {
+            let guild_id = guild.id;
+            let data = ctx.data.read().await;
+            let db = data.get::<PgPoolContainer>().unwrap();
+            let non_bot_members: Vec<i64> = guild
+                .members
+                .clone()
+                .into_iter()
+                .filter(|(_id, m)| !m.user.bot)
+                .map(|(id, _m)| id.0 as i64)
+                .collect();
+            let db_guild = Guild::new(db, guild_id);
+            if let Err(why) = db_guild.insert().await {
+                error!("error adding guild to db {:?}", why);
+                return Ok(());
+            };
 
-#[group("Master")]
-#[sub_groups(Meta, Fun, Music, Mod)]
-pub struct Master;
-
-// The basic commands group is being defined here.
-// this group includes the commands that basically every bot has, nothing really special.
-#[group("Meta")]
-#[description = "All the basic commands that basically every bot has."]
-#[commands(ping, invite, about)]
-struct Meta;
-
-// The FUN command group.
-// Where all the random commands goes into.
-#[group("Fun")]
-#[description = "All the random and fun commands."]
-#[commands(
-    profile,
-    qr,
-    urban,
-    dictionary,
-    translate,
-    duck_duck_go,
-    calculator,
-    poll,
-    chuck,
-    dice,
-    uwufy,
-    fact,
-    why,
-    eightball,
-    valorant,
-    ship,
-    pp,
-    respect,
-    triggered
-)]
-struct Fun;
-
-// The GAMES command group.
-// Small fun games.
-#[group("Games")]
-#[description = "Small fun games."]
-#[commands(trivia)]
-struct Games;
-
-// The Roleplay command group.
-// Where all the random roleplay goes into.
-#[group("Roleplay")]
-#[description = "All the fun roleplay commands."]
-#[commands(baka, cuddle, hug, kiss, pat, poke, slap, smug, tickle)]
-struct Roleplay;
-
-// The Economy command group.
-// Where all the economy commands goes into.
-#[group("Economy")]
-#[description = "All the fun economy related commands."]
-#[commands(balance, daily, gamble, leaderboard)]
-struct Economy;
-
-// The moderation command group.
-#[group("Moderation")]
-#[description = "All the moderation related commands."]
-#[commands(kick, ban, clear)]
-struct Mod;
-
-// The reddit command group.
-#[group("Reddit")]
-#[description = "All the reddit related commands."]
-#[commands(meme, reddit_image, reddit_text)]
-struct Reddit;
-
-// The Hydrate command group.
-#[group("Hydrate")]
-#[description = "Add/Remove yourself to/from hydrate reminder.
-
- Configurable aspects:
- `add`: Add yourself to hydrate reminder.
- `remove`: Remove yourself from hydrate reminder."]
-#[prefixes("hydrate")]
-#[commands(add_hydrate, remove_hydrate)]
-struct Hydrate;
-
-// The music command group.
-#[group("Music")]
-#[description = "All the voice and music related commands."]
-#[only_in("guilds")]
-#[commands(
-    join,
-    leave,
-    play,
-    pause,
-    resume,
-    stop,
-    skip,
-    shuffle,
-    queue,
-    clear_queue,
-    // repeat,
-    remove,
-    now_playing,
-    // lyrics
-    lofi,
-)]
-struct Music;
-
-// The soundboard command group.
-#[group("Soundboard")]
-#[description = "Soundboard commands."]
-#[only_in("guilds")]
-#[commands(sheesh, soundboard)]
-struct Soundboard;
-
-// The configuration command.
-// Technically a group, but it only has a single command.
-#[group("Configuration")]
-#[description = "All the configuration related commands.
-Basic usage:
-`config guild VALUE DATA`"]
-#[prefixes("config", "configure")]
-#[commands(guild)]
-struct Configuration;
-
-// This is a custom help command.
-#[help]
-#[individual_command_tip = "Hello!
-If youd like to get more information about a specific command or group, you can just pass it as a command argument.
-All the command examples through out the help will be shown without prefix, use whatever prefix is configured on the server instead.\n"]
-#[command_not_found_text = "Could not find: `{}`."]
-#[strikethrough_commands_tip_in_dm = "~~`Strikethrough commands`~~ are unavailabe because the bot is unable to run them."]
-#[strikethrough_commands_tip_in_guild = "~~`Strikethrough commands`~~ are unavailabe because the bot is unable to run them."]
-#[max_levenshtein_distance(3)]
-#[lacking_permissions = "Hide"]
-#[lacking_role = "Hide"]
-#[wrong_channel = "Strike"]
-#[group_prefix = "Prefix commands"]
-async fn my_help(
-    ctx: &Context,
-    msg: &Message,
-    args: Args,
-    help_options: &'static HelpOptions,
-    groups: &[&'static CommandGroup],
-    owners: HashSet<UserId>,
-) -> CommandResult {
-    let mut ho = help_options.clone();
-    ho.embed_error_colour = Colour::from_rgb(255, 30, 30);
-    ho.embed_success_colour = Colour::from_rgb(141, 91, 255);
-    help_commands::with_embeds(ctx, msg, args, &ho, groups, owners).await;
+            if let Ok(db_members) = db_guild.get_members().await {
+                let db_member_ids: Vec<i64> = db_members.iter().map(|m| m.id).collect();
+                for id in non_bot_members {
+                    if !db_member_ids.contains(&id) {
+                        if let Err(why) = db_guild.insert_member(id).await {
+                            error!("error adding member to db guild {:?}", why);
+                            return Ok(());
+                        };
+                    }
+                }
+            }
+        }
+        Event::GuildMemberAddition {
+            guild_id,
+            new_member,
+        } => {
+            if !new_member.user.bot {
+                let member_id = new_member.user.id;
+                let data = ctx.data.read().await;
+                let db = data.get::<PgPoolContainer>().unwrap();
+                let db_guild = Guild::new(db, guild_id.0 as i64);
+                if let Ok(member) = db_guild.get_member(member_id).await {
+                    if member.is_none() {
+                        if let Err(why) = db_guild.insert_member(member_id).await {
+                            error!("error adding member to db guild {:?}", why)
+                        }
+                    }
+                }
+            }
+        }
+        _ => return Ok(()),
+    }
     Ok(())
 }
 
-// This is for errors that happen before command execution.
-#[hook]
-async fn on_dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
-    match error {
-        // Notify the user if the reason of the command failing to execute was because of insufficient arguments.
-        DispatchError::NotEnoughArguments { min, given } => {
-            let s = {
-                if given == 0 && min == 1 {
-                    format!("I need an argument to run this command")
-                } else if given == 0 {
-                    format!("I need atleast {} arguments to run this command", min)
-                } else {
-                    format!(
-                        "I need {} arguments to run this command, but i was only given {}.",
-                        min, given
-                    )
-                }
-            };
-            let _ = msg.reply(ctx, s).await;
-        }
-        // DispatchError::IgnoredBot {} => {
-        //     return;
-        // }
-        DispatchError::CheckFailed(_, reason) => {
-            if let Reason::User(r) = reason {
-                let _ = msg.reply(ctx, r).await;
-            }
-        }
-        DispatchError::Ratelimited(x) => {
-            let _ = msg
-                .reply(
-                    ctx,
-                    format!(
-                        "You can't run this command for {} more seconds.",
-                        x.as_secs()
-                    ),
-                )
-                .await;
-        }
-        _ => {
-            error!("Unhandled dispatch error: {:?}", error);
-        }
-    }
-}
+pub fn get_framework_builder(
+    bot_token: String,
+    owners: HashSet<UserId>,
+) -> FrameworkBuilder<Data, Error> {
+    let options: FrameworkOptions<Data, Error> = FrameworkOptions {
+        prefix_options: PrefixFrameworkOptions {
+            edit_tracker: Some(EditTracker::for_timespan(Duration::from_secs(3600))),
+            ..Default::default()
+        },
+        on_error: |e, ctx| Box::pin(on_error(e, ctx)),
+        owners,
+        listener: |ctx, event, framework, data| Box::pin(listener(ctx, event, framework, data)),
+        ..Default::default()
+    };
 
-// This function executes before a command is called.
-#[hook]
-async fn before(ctx: &Context, msg: &Message, cmd_name: &str) -> bool {
-    if let Some(guild_id) = msg.guild_id {
-        let data = ctx.data.read().await;
-        if let Some(guild_cache_map) = data.get::<GuildCacheStore>() {
-            if let Some(guild_cache) = guild_cache_map.get(guild_id) {
-                if guild_cache
-                    .disabled_commands
-                    .contains(&cmd_name.to_string())
-                {
-                    let _ = msg
-                        .reply(
-                            ctx,
-                            "This command has been disabled by an administrtor of this guild.",
-                        )
-                        .await;
-                    return false;
-                }
-            }
-        }
-    }
-    info!("Running command: {}", &cmd_name);
-    debug!("Message: {}", &msg.content);
-    true
-}
-
-// This function executes every time a command finishes executing.
-#[hook]
-async fn after(ctx: &Context, msg: &Message, cmd_name: &str, error: CommandResult) {
-    if let Err(why) = &error {
-        error!("Error while running command {}", &cmd_name);
-        error!("{:?}", &error);
-        if let Err(_) = msg.reply(ctx, why).await {
-            error!(
-                "Unable to send messages on channel id {}",
-                &msg.channel_id.0
-            );
-        };
-    }
-}
-
-// Dynamic guild specic prefix
-#[hook]
-async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
-    let data = ctx.data.read().await;
-    if let Some(id) = msg.guild_id {
-        if let Some(guild_cache_map) = data.get::<GuildCacheStore>() {
-            if let Some(guild_cache) = guild_cache_map.get(id.0 as i64) {
-                return Some(guild_cache.prefix.clone());
-            }
-        }
-    }
-    Some(DEFAULT_PREFIX.clone())
-}
-
-// Helper function to build serenity command framework
-pub async fn get_std_framework(owners: HashSet<UserId>, bot_id: UserId) -> StandardFramework {
-    StandardFramework::new()
-        .configure(|c| {
-            c.allow_dm(false)
-                .on_mention(Some(bot_id))
-                .dynamic_prefix(dynamic_prefix)
-                .owners(owners)
-                .case_insensitivity(true)
-        })
-        .before(before)
-        .after(after)
-        .bucket("reddit", |b| b.delay(5).time_span(5).limit(1))
-        .await
-        .on_dispatch_error(on_dispatch_error)
-        .group(&META_GROUP)
-        .group(&FUN_GROUP)
-        .group(&GAMES_GROUP)
-        .group(&ROLEPLAY_GROUP)
-        .group(&ECONOMY_GROUP)
-        .group(&REDDIT_GROUP)
-        .group(&MUSIC_GROUP)
-        .group(&SOUNDBOARD_GROUP)
-        .group(&MOD_GROUP)
-        .group(&HYDRATE_GROUP)
-        .group(&CONFIGURATION_GROUP)
-        .help(&MY_HELP)
+    Framework::build()
+        .prefix(PREFIX.clone())
+        .token(bot_token)
+        .options(options)
+        // Command Initialization
+        // Meta
+        .command(meta::register(), |f| f.category("Meta"))
+        .command(meta::help(), |f| f.category("Meta"))
+        .command(meta::about(), |f| f.category("Meta"))
+        .command(meta::invite(), |f| f.category("Meta"))
+        .command(meta::ping(), |f| f.category("Meta"))
+        // Music
+        .command(music::join(), |f| f.category("Music"))
+        .command(music::leave(), |f| f.category("Music"))
+        .command(music::play(), |f| f.category("Music"))
+        .command(music::skip(), |f| f.category("Music"))
+        .command(music::pause(), |f| f.category("Music"))
+        .command(music::resume(), |f| f.category("Music"))
+        .command(music::seek(), |f| f.category("Music"))
+        .command(music::clear(), |f| f.category("Music"))
+        .command(music::now_playing(), |f| f.category("Music"))
+        .command(music::queue(), |f| f.category("Music"))
+        // Economy
+        .command(economy::balance(), |f| f.category("Economy"))
+        .command(economy::daily(), |f| f.category("Economy"))
+        .command(economy::gamble(), |f| f.category("Economy"))
+        .command(economy::leaderboard(), |f| f.category("Economy"))
+        // Fun
+        .command(fun::chuck(), |f| f.category("Fun"))
+        .command(fun::dice(), |f| f.category("Fun"))
+        .command(fun::duck_duck_go(), |f| f.category("Fun"))
+        .command(fun::eightball(), |f| f.category("Fun"))
+        .command(fun::fact(), |f| f.category("Fun"))
+        .command(fun::poll(), |f| f.category("Fun"))
+        .command(fun::pp(), |f| f.category("Fun"))
+        .command(fun::profile(), |f| f.category("Fun"))
+        .command(fun::respect(), |f| f.category("Fun"))
+        .command(fun::ship(), |f| f.category("Fun"))
+        .command(fun::translate(), |f| f.category("Fun"))
+        .command(fun::triggered(), |f| f.category("Fun"))
+        .command(fun::urban(), |f| f.category("Fun"))
+        .command(fun::uwufy(), |f| f.category("Fun"))
+        .command(fun::why(), |f| f.category("Fun"))
+        // Reddit
+        .command(reddit::meme(), |f| f.category("Reddit"))
+        .command(reddit::reddit_image(), |f| f.category("Reddit"))
+        .command(reddit::reddit_text(), |f| f.category("Reddit"))
+        // Roleplay
+        .command(roleplay::baka(), |f| f.category("Roleplay"))
+        .command(roleplay::cuddle(), |f| f.category("Roleplay"))
+        .command(roleplay::hug(), |f| f.category("Roleplay"))
+        .command(roleplay::kiss(), |f| f.category("Roleplay"))
+        .command(roleplay::pat(), |f| f.category("Roleplay"))
+        .command(roleplay::poke(), |f| f.category("Roleplay"))
+        .command(roleplay::slap(), |f| f.category("Roleplay"))
+        .command(roleplay::smug(), |f| f.category("Roleplay"))
+        .command(roleplay::tickle(), |f| f.category("Roleplay"))
 }
